@@ -8,7 +8,7 @@ from tracker_model import TrackerModel
 def initialize_simulation(conf_file_name):
     """Initialize simulation and dynamic model."""
     cur_dir = os.path.dirname(os.path.abspath(__file__))
-    sim = pb.SimInterface(conf_file_name, conf_file_path_ext=cur_dir)
+    sim = pb.SimInterface(conf_file_name, conf_file_path_ext=cur_dir, use_gui=False)
     
     ext_names = np.expand_dims(np.array(sim.getNameActiveJoints()), axis=0)
     source_names = ["pybullet"]
@@ -34,7 +34,7 @@ def print_joint_info(sim, dyn_model, controlled_frame_name):
     print(f"Joint velocity limits: {joint_vel_limits}")
     
 
-def getSystemMatricesContinuos(num_joints, damping_coefficients=None):
+def getSystemMatrices(sim, num_joints, damping_coefficients=None):
     """
     Get the system matrices A and B according to the dimensions of the state and control input.
     
@@ -50,25 +50,33 @@ def getSystemMatricesContinuos(num_joints, damping_coefficients=None):
     num_states = 2 * num_joints
     num_controls = num_joints
     
+    time_step = sim.GetTimeStep()
     
     # Initialize A matrix
-    A = np.zeros((num_states,num_states))
+    A = np.eye(num_states)
     
     # Upper right quadrant of A (position affected by velocity)
-    A[:num_joints, num_joints:] = np.eye(num_joints) 
+    A[:num_joints, num_joints:] = np.eye(num_joints) * time_step
     
     # Lower right quadrant of A (velocity affected by damping)
-    #if damping_coefficients is not None:
-    #    damping_matrix = np.diag(damping_coefficients)
-    #    A[num_joints:, num_joints:] = np.eye(num_joints) - time_step * damping_matrix
+    if damping_coefficients is not None:
+        damping_matrix = np.diag(damping_coefficients)
+        A[num_joints:, num_joints:] = np.eye(num_joints) - time_step * damping_matrix
     
     # Initialize B matrix
-    B = np.zeros((num_states, num_controls))
+    B = np.zeros((2*num_joints, num_controls))
     
     # Lower half of B (control input affects velocity)
-    B[num_joints:, :] = np.eye(num_controls) 
+    B[num_joints:, :] = np.eye(num_controls) * time_step
+
+    Atop = np.hstack((A, np.zeros((2 * num_joints, 2 * num_joints))))
+    Abtm = np.hstack((A, np.eye(2 * num_joints)))
+
+    Aa = np.vstack(( Atop, Abtm))
+
+    Ba = np.vstack((B, B))
     
-    return A, B
+    return Aa, Ba
 
 # Example usage:
 # sim = YourSimulationObject()
@@ -89,7 +97,7 @@ def getCostMatrices(num_joints):
     num_controls = num_joints
     
     # Q = 1 * np.eye(num_states)  # State cost matrix
-    Q = 10000 * np.eye(num_states)
+    Q = 1000 * np.eye(num_states)
     #Q[num_joints:, num_joints:] = 0.0
     
     R = 0.1 * np.eye(num_controls)  # Control input cost matrix
@@ -112,23 +120,24 @@ def main():
     # Initialize data storage
     q_mes_all, qd_mes_all, q_d_all, qd_d_all = [], [], [], []
     regressor_all = np.array([])
-
-    # Define the matrices
-    A, B = getSystemMatricesContinuos(num_joints)
-    Q, R = getCostMatrices(num_joints)
     
     # Measuring all the state
-    num_states = 2 * num_joints
-    C = np.eye(num_states)
+    num_states = 4 * num_joints
+    ln = num_joints * 2
+    C = np.hstack((np.zeros((ln, ln)), np.eye(ln)))
+
+    # Define the matrices
+    A, B = getSystemMatrices(sim, num_joints)
+    Q, R = getCostMatrices(num_joints)
     
     # Horizon length
     N_mpc = 10
 
     # Initialize the regulator model
-    tracker = TrackerModel(A, B, C, Q, R, N_mpc, num_states, num_joints, num_states, sim.GetTimeStep())
+    tracker = TrackerModel(A, B, C, Q, R, N_mpc, 2 * num_joints, num_joints, num_states)
     # Compute the matrices needed for MPC optimization
-    S_bar, S_bar_C, T_bar, T_bar_C, Q_hat, Q_bar, R_bar = tracker.propagation_model_tracker_fixed_std()
-    H,Ftra = tracker.tracker_std(S_bar, T_bar, Q_hat, Q_bar, R_bar)
+    S_bar, T_bar, Q_bar, R_bar = tracker.propagation_model_tracker_fixed_std()
+    H,Ftra = tracker.tracker_std(S_bar, T_bar, Q_bar, R_bar)
     
     # Sinusoidal reference
     # Specify different amplitude values for each joint
@@ -148,9 +157,11 @@ def main():
     time_step = sim.GetTimeStep()
     steps = int(episode_duration/time_step)
     sim.ResetPose()
-    # sim.SetSpecificPose([1, 1, 1, 0.4, 0.5, 0.6, 0.7])
+    #sim.SetjointPosition([1, 1, 1, 0.4, 0.5, 0.6, 0.7])
     # testing loop
     u_mpc = np.zeros(num_joints)
+    prev_x0_mpc = np.zeros((14, ))
+    prev_x0_mpc.flatten()
     for i in range(steps):
         # measure current state
         q_mes = sim.GetMotorAngles(0)
@@ -165,17 +176,20 @@ def main():
         # generate the predictive trajectory for N steps
         for j in range(N_mpc):
             q_d, qd_d = ref.get_values(current_time + j*time_step)
-            
+            if j == 0:
+                q_d_all.append(q_d)
+                qd_d_all.append(qd_d)
             # here i need to stack the q_d and qd_d
             x_ref.append(np.vstack((q_d.reshape(-1, 1), qd_d.reshape(-1, 1))))
         
         x_ref = np.vstack(x_ref).flatten()
-        
 
         # Compute the optimal control sequence
-        u_star = tracker.computesolution(x_ref,x0_mpc,u_mpc, H, Ftra)
+        u_star = tracker.computesolution(x_ref,np.array(x0_mpc - prev_x0_mpc), x0_mpc,u_mpc.shape[0] * N_mpc, H, Ftra)
         # Return the optimal control sequence
         u_mpc += u_star[:num_joints]
+
+        prev_x0_mpc = x0_mpc
        
         # Control command
         cmd.tau_cmd = dyn_cancel(dyn_model, q_mes, qd_mes, u_mpc)
@@ -194,15 +208,10 @@ def main():
         q_mes_all.append(q_mes)
         qd_mes_all.append(qd_mes)
 
-        q_d, qd_d = ref.get_values(current_time)
-
-        q_d_all.append(q_d)
-        qd_d_all.append(qd_d)
-
         # time.sleep(0.01)  # Slow down the loop for better visualization
         # get real time
         current_time += time_step
-        print(f"Time: {current_time}")
+        #print(f"Time: {current_time}")
     
     
     
@@ -229,6 +238,8 @@ def main():
         plt.legend()
 
         plt.tight_layout()
+
+        plt.savefig(f'plots/joint_{i}_Qp_1000_Qv_1000.png')
         plt.show()
     
      
