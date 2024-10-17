@@ -8,7 +8,7 @@ from regulator_model import RegulatorModel
 def initialize_simulation(conf_file_name):
     """Initialize simulation and dynamic model."""
     cur_dir = os.path.dirname(os.path.abspath(__file__))
-    sim = pb.SimInterface(conf_file_name, conf_file_path_ext=cur_dir)
+    sim = pb.SimInterface(conf_file_name, conf_file_path_ext=cur_dir, use_gui=False)
     
     ext_names = np.expand_dims(np.array(sim.getNameActiveJoints()), axis=0)
     source_names = ["pybullet"]
@@ -34,14 +34,14 @@ def print_joint_info(sim, dyn_model, controlled_frame_name):
     print(f"Joint velocity limits: {joint_vel_limits}")
     
 
-def getSystemMatrices(sim, num_joints, damping_coefficients=None):
+def getSystemMatrices(sim, num_joints, damping=None):
     """
     Get the system matrices A and B according to the dimensions of the state and control input.
     
     Parameters:
     sim: Simulation object
     num_joints: Number of robot joints
-    damping_coefficients: List or numpy array of damping coefficients for each joint (optional)
+    damping: List or numpy array of damping coefficients for each joint (optional)
     
     Returns:
     A: State transition matrix
@@ -51,9 +51,19 @@ def getSystemMatrices(sim, num_joints, damping_coefficients=None):
     num_controls = num_joints
     
     time_step = sim.GetTimeStep()
-    
-    # TODO: Finish the system matrices 
-    
+
+    # Initialize A matrix
+    A = np.eye(num_states)
+    # Upper right quadrant of A (position affected by velocity)
+    A[:num_joints, num_joints:] = np.eye(num_joints) * time_step
+
+    if damping:
+        A[num_joints:, num_joints:] -= np.diag(damping, 0) * time_step
+    print(A)
+
+    B = np.vstack((np.zeros((num_joints, num_joints)), time_step * np.eye(num_joints) ))
+    print(B)
+
     return A, B
 
 
@@ -70,7 +80,11 @@ def getCostMatrices(num_joints):
     
     # Q = 1 * np.eye(num_states)  # State cost matrix
     Q = 1000 * np.eye(num_states)
-    Q[num_joints:, num_joints:] = 0.0
+
+    velocity_gain = 0
+    Q[num_joints:, num_joints:] = velocity_gain * np.eye(num_joints)
+
+    print(Q)
     
     R = 0.1 * np.eye(num_controls)  # Control input cost matrix
     
@@ -93,7 +107,9 @@ def main():
     q_mes_all, qd_mes_all, q_d_all, qd_d_all = [], [], [], []
 
     # Define the matrices
-    A, B = getSystemMatrices(sim, num_joints)
+    damping_flag = dyn_model.GetConfigurationVariable('motor_damping')
+    damping_param = dyn_model.GetConfigurationVariable('motor_damping_coeff')
+    A, B = getSystemMatrices(sim, num_joints, damping_param if damping_flag[0] else None)
     Q, R = getCostMatrices(num_joints)
     
     # Measuring all the state
@@ -115,7 +131,7 @@ def main():
     time_step = sim.GetTimeStep()
     steps = int(episode_duration/time_step)
     sim.ResetPose()
-    # sim.SetSpecificPose([1, 1, 1, 0.4, 0.5, 0.6, 0.7])
+    sim.SetjointPosition([1, 1, 1, 0.4, 0.5, 0.6, 0.7])
     # testing loop
     for i in range(steps):
         # measure current state
@@ -135,7 +151,6 @@ def main():
         cmd.tau_cmd = dyn_cancel(dyn_model, q_mes, qd_mes, u_mpc)
         sim.Step(cmd, "torque")  # Simulation step with torque command
 
-        print(cmd.tau_cmd)
         # Exit logic with 'q' key
         keys = sim.GetPyBulletClient().getKeyboardEvents()
         qKey = ord('q')
@@ -151,7 +166,7 @@ def main():
         # time.sleep(0.01)  # Slow down the loop for better visualization
         # get real time
         current_time += time_step
-        print(f"Current time: {current_time}")
+        #print(f"Current time: {current_time}")
     
     
     
@@ -165,6 +180,7 @@ def main():
         plt.title(f'Position Tracking for Joint {i+1}')
         plt.xlabel('Time steps')
         plt.ylabel('Position')
+        plt.grid()
         plt.legend()
 
         # Velocity plot for joint i
@@ -173,9 +189,12 @@ def main():
         plt.title(f'Velocity Tracking for Joint {i+1}')
         plt.xlabel('Time steps')
         plt.ylabel('Velocity')
+        plt.grid()
         plt.legend()
 
         plt.tight_layout()
+
+        plt.savefig(f'plot{i}.png')
         plt.show()
     
      
