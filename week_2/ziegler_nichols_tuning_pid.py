@@ -133,10 +133,14 @@ def perform_frequency_analysis(data, dt, show=True):
     if show:
         plt.show()
     else:
-        plt.savefig(
-            f"./Estimation_and_Control_labs/week_2/figures/joint_{joint_id}_fft.png",
-            dpi=300,
-        )
+        [
+            plt.savefig(
+                f"./Estimation_and_Control_labs/week_2/{folder}/joint_{joint_id}_fft.{ext}",
+                dpi=300,
+            )
+            for ext in ["pdf"]
+            for folder in ["figures", "6705473a56910e63851eabd8/figures"]
+        ]
     plt.close()
 
     return xf, power
@@ -208,10 +212,14 @@ def plot_joint_pos(
     if show:
         plt.show()
     else:
-        plt.savefig(
-            f"./Estimation_and_Control_labs/week_2/figures/joint_{joint_id}_Kp_{kp}.png",
-            dpi=300,
-        )
+        [
+            plt.savefig(
+                f"./Estimation_and_Control_labs/week_2/{folder}/joint_{joint_id}_Kp_{kp}.{ext}",
+                dpi=300,
+            )
+            for ext in ["pdf"]
+            for folder in ["figures", "6705473a56910e63851eabd8/figures"]
+        ]
     plt.close()
 
 
@@ -395,8 +403,12 @@ if __name__ == "__main__":
         plt.ylabel("Position")
         plt.suptitle(f"Joint {i} under PD Control")
         plt.title(f"Kp={Kp[i]} Kd={Kd[i]}")
-        plt.savefig(
-            f"./Estimation_and_Control_labs/week_2/figures/joint_{i}_pd.png",
-            dpi=300,
-        )
+        [
+            plt.savefig(
+                f"./Estimation_and_Control_labs/week_2/{folder}/joint_{i}_pd.{ext}",
+                dpi=300,
+            )
+            for ext in ["pdf"]
+            for folder in ["figures", "6705473a56910e63851eabd8/figures"]
+        ]
         plt.close()
