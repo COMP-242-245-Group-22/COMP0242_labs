@@ -2,6 +2,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 class TrackerModel:
+
     def __init__(self, A, B, C, Q, R, N, q, m, n):
         self.A = A
         self.B = B
@@ -11,6 +12,7 @@ class TrackerModel:
         self.N = N # prediction horizon
         self.q = q # number of outputs  
         self.m = m # Number of control inputs
+
         self.n = n # Number of states
 
     def tracker_std(self,S_bar, T_bar, Q_bar, R_bar):
@@ -60,7 +62,6 @@ class TrackerModel:
     
 
     
-
     def computesolution(self,x_ref, delta_x, x_cur, u_shape, H, F_tra):
         F = np.dot(np.hstack([x_ref, delta_x, x_cur]), F_tra)
 

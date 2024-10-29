@@ -189,7 +189,6 @@ class CustomLinReference:
         return q_d, qd_d
 
 
-
 def main():
     # Configuration
     conf_file_name = "pandaconfig.json"
@@ -203,6 +202,7 @@ def main():
     print_joint_info(sim, dyn_model, controlled_frame_name)
     
     # Initialize data storage
+
     q_mes_all, qd_mes_all, q_d_all, qd_d_all, qdd_d_all, tau_d_all = [], [], [], [], [], []
     regressor_all = np.array([])
     
@@ -234,6 +234,7 @@ def main():
     amplitude = np.array(amplitudes)
     frequency = np.array(frequencies)
     ref = SinusoidalReference(amplitude, frequency, sim.GetInitMotorAngles())  # Initialize the reference
+
     # TO USE MEXICAN HAT TRAJECTORY UNCOMMENT:
     # ref = CustomMexReference() 
     # TO USE ARCTAN-LIKE TRAJECTORY UNCOMMENT:
@@ -242,17 +243,20 @@ def main():
     # ref = CustomLinReference()
 
 
+
     # Main control loop
     episode_duration = 5 # duration in seconds
     current_time = 0
     time_step = sim.GetTimeStep()
     steps = int(episode_duration/time_step)
     sim.ResetPose()
+
     #sim.SetjointPosition([1, 1, 1, 0.4, 0.5, 0.6, 0.7])
     # testing loop
     u_mpc = np.zeros(num_joints)
     prev_x0_mpc = np.zeros((14, ))
     prev_x0_mpc.flatten()
+
     for i in range(steps):
         # measure current state
         q_mes = sim.GetMotorAngles(0)
@@ -270,6 +274,7 @@ def main():
             if j == 0:
                 q_d_all.append(q_d)
                 qd_d_all.append(qd_d)
+
             # here i need to stack the q_d and qd_d
             x_ref.append(np.vstack((q_d.reshape(-1, 1), qd_d.reshape(-1, 1))))
         
@@ -283,12 +288,12 @@ def main():
         qdd_d_all.append(np.array(u_mpc))
 
         prev_x0_mpc = x0_mpc
+
        
         # Control command
         tau_cmd = dyn_cancel(dyn_model, q_mes, qd_mes, u_mpc)
         cmd.SetControlCmd(tau_cmd, ["torque"]*7)
         sim.Step(cmd, "torque")  # Simulation step with torque command
-
         tau_d_all.append(tau_cmd)
 
         # Exit logic with 'q' key
@@ -352,6 +357,7 @@ def main():
         plt.tight_layout()
 
         plt.savefig(f'plots/joint_{i}_Qp_{P}_Qv_{V}_R_{E}.png')
+
 
         plt.show()
     
