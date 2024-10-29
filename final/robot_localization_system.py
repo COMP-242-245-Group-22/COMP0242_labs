@@ -21,6 +21,12 @@ class Map(object):
     def __init__(self):
         self.landmarks = np.array([[5, 10], [15, 5], [10, 15]])
 
+    def use_more_landmarks(self, n):
+        # nxn grid of landmarks centered at the origin
+        self.landmarks = np.array(
+            [[i, j] for i in range(-n, n, 2) for j in range(-n, n, 2)]
+        )
+
 
 class RobotEstimator(object):
     def __init__(self, filter_config, map):
@@ -110,6 +116,41 @@ class RobotEstimator(object):
         self._Sigma_est = (np.eye(len(self._x_est)) - K @ C) @ self._Sigma_pred
 
     def update_from_landmark_range_observations(self, y_range):
+        # Predicted the landmark measurements and build up the observation Jacobian
+        y_pred = []
+        C = []
+        x_pred = self._x_pred
+        for lm in self._map.landmarks:
+
+            dx_pred = lm[0] - x_pred[0]
+            dy_pred = lm[1] - x_pred[1]
+            range_pred = np.sqrt(dx_pred**2 + dy_pred**2)
+            y_pred.append(range_pred)
+
+            # Jacobian of the measurement model
+            C_range = np.array(
+                [-(dx_pred) / range_pred, -(dy_pred) / range_pred, 0]
+            )
+            C.append(C_range)
+        # Convert lists to arrays
+        C = np.array(C)
+        y_pred = np.array(y_pred)
+
+        # Innovation. Look new information! (geddit?)
+        nu = y_range - y_pred
+
+        # Since we are observing a bunch of landmarks build the covariance matrix. Note you could swap this to just calling the ekf update call multiple times, once for each observation, as well
+        W_landmarks = self._config.W_range * np.eye(len(self._map.landmarks))
+        self._do_kf_update(nu, C, W_landmarks)
+
+        # Angle wrap afterwards
+        self._x_est[-1] = np.arctan2(
+            np.sin(self._x_est[-1]), np.cos(self._x_est[-1])
+        )
+
+    def update_from_landmark_range_bearing_observations(
+        self, y_range, y_bearing
+    ):
         # Predicted the landmark measurements and build up the observation Jacobian
         y_pred = []
         C = []
