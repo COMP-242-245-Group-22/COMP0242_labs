@@ -67,6 +67,10 @@ def getSystemMatrices(sim, num_joints, damping=None):
     return A, B
 
 
+P = 1000
+V = 10
+E = 0.1
+
 def getCostMatrices(num_joints):
     """
     Get the cost matrices Q and R for the MPC controller.
@@ -79,14 +83,12 @@ def getCostMatrices(num_joints):
     num_controls = num_joints
     
     # Q = 1 * np.eye(num_states)  # State cost matrix
-    Q = 1000 * np.eye(num_states)
-
-    velocity_gain = 0
-    Q[num_joints:, num_joints:] = velocity_gain * np.eye(num_joints)
+    Q = P * np.eye(num_states)
+    Q[num_joints:, num_joints:] = V * np.eye(num_joints)
 
     print(Q)
     
-    R = 0.1 * np.eye(num_controls)  # Control input cost matrix
+    R = E * np.eye(num_controls)  # Control input cost matrix
     
     return Q, R
 
@@ -104,7 +106,7 @@ def main():
     print_joint_info(sim, dyn_model, controlled_frame_name)
     
     # Initialize data storage
-    q_mes_all, qd_mes_all, q_d_all, qd_d_all = [], [], [], []
+    q_mes_all, qd_mes_all, q_d_all, qd_d_all, qdd_d_all, tau_d_all = [], [], [], [], [], []
 
     # Define the matrices
     damping_flag = dyn_model.GetConfigurationVariable('motor_damping')
@@ -131,7 +133,8 @@ def main():
     time_step = sim.GetTimeStep()
     steps = int(episode_duration/time_step)
     sim.ResetPose()
-    sim.SetjointPosition([1, 1, 1, 0.4, 0.5, 0.6, 0.7])
+    sim.SetjointPosition([1, 1, 1, 1, 0.5, 1.2, 0.7])
+    dd = np.array([0, 0, 0, -0.6, 0, -0.8, 0]).reshape(-1, )
     # testing loop
     for i in range(steps):
         # measure current state
@@ -139,17 +142,22 @@ def main():
         qd_mes = sim.GetMotorVelocities(0)
         qdd_est = sim.ComputeMotorAccelerationTMinusOne(0)
         
-        x0_mpc = np.vstack((q_mes, qd_mes))
+        x0_mpc = np.vstack((q_mes + dd, qd_mes))
         x0_mpc = x0_mpc.flatten()
         # Compute the optimal control sequence
         H_inv = np.linalg.inv(H)
         u_mpc = -H_inv @ F @ x0_mpc
         # Return the optimal control sequence
         u_mpc = u_mpc[0:num_joints]
+
+        qdd_d_all.append(np.array(u_mpc))
        
         # Control command
-        cmd.tau_cmd = dyn_cancel(dyn_model, q_mes, qd_mes, u_mpc)
+        tau_cmd = dyn_cancel(dyn_model, q_mes, qd_mes, u_mpc)
+        cmd.SetControlCmd(tau_cmd, ["torque"]*7)
         sim.Step(cmd, "torque")  # Simulation step with torque command
+
+        tau_d_all.append(tau_cmd)
 
         # Exit logic with 'q' key
         keys = sim.GetPyBulletClient().getKeyboardEvents()
@@ -172,6 +180,23 @@ def main():
     
     # Plotting
     for i in range(num_joints):
+        plt.figure(figsize=(10, 8))
+        plt.subplot(2, 1, 1)
+        plt.plot([qd[i] for qd in qdd_d_all], label=f'Desired Acceleration - Joint {i+1}', linestyle='--')
+        plt.title(f'Acceleration for Joint {i+1}')
+        plt.xlabel('Time steps')
+        plt.ylabel('Acceleration')
+        plt.legend()
+
+        plt.subplot(2, 1, 2)
+        plt.plot([qd[i] for qd in tau_d_all], label=f'Applied Torque - Joint {i+1}', linestyle='--')
+        plt.title(f'Torque for Joint {i+1}')
+        plt.xlabel('Time steps')
+        plt.ylabel('Torque')
+        plt.legend()
+        plt.tight_layout()
+
+
         plt.figure(figsize=(10, 8))
         
         # Position plot for joint i
