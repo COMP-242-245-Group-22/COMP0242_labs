@@ -1,22 +1,22 @@
 import numpy as np
 
 # Example values
-v0 = 1.0             # Initial velocity
-theta0 = np.pi / 4   # Initial orientation (45 degrees)
-delta_t = 0.1        # Time step
+v0 = 1.0  # Initial velocity
+theta0 = np.pi / 4  # Initial orientation (45 degrees)
+delta_t = 0.1  # Time step
 
 # System matrices
-A = np.array([
-    [1, 0, -v0 * delta_t * np.sin(theta0)],
-    [0, 1, v0 * delta_t * np.cos(theta0)],
-    [0, 0, 1]
-])
+A = np.array(
+    [
+        [1, 0, -v0 * delta_t * np.sin(theta0)],
+        [0, 1, v0 * delta_t * np.cos(theta0)],
+        [0, 0, 1],
+    ]
+)
 
-B = np.array([
-    [delta_t * np.cos(theta0), 0],
-    [delta_t * np.sin(theta0), 0],
-    [0, delta_t]
-])
+B = np.array(
+    [[delta_t * np.cos(theta0), 0], [delta_t * np.sin(theta0), 0], [0, delta_t]]
+)
 
 # Number of states
 n = A.shape[0]

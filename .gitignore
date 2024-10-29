@@ -5,6 +5,9 @@ models/
 # Ignore the egg-info directory
 configs/
 
+.pytest_cache/
+__pycache__/
+
 simulation_and_control/
-*.rsls
-*.rslsi
+*.rsls*
+67*/

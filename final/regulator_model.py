@@ -1,5 +1,6 @@
 import numpy as np
-    
+
+
 class RegulatorModel:
     def __init__(self, N, q, m, n):
         self.A = None
@@ -8,9 +9,9 @@ class RegulatorModel:
         self.Q = None
         self.R = None
         self.N = N
-        self.q = q #  output dimension
-        self.m = m #  input dimension
-        self.n = n #  state dimension
+        self.q = q  #  output dimension
+        self.m = m  #  input dimension
+        self.n = n  #  state dimension
 
     def compute_H_and_F(self, S_bar, T_bar, Q_bar, R_bar):
         # Compute H
@@ -22,33 +23,45 @@ class RegulatorModel:
         return H, F
 
     def propagation_model_regulator_fixed_std(self):
-        S_bar = np.zeros((self.N*self.q, self.N*self.m))
-        T_bar = np.zeros((self.N*self.q, self.n))
-        Q_bar = np.zeros((self.N*self.q, self.N*self.q))
-        R_bar = np.zeros((self.N*self.m, self.N*self.m))
+        S_bar = np.zeros((self.N * self.q, self.N * self.m))
+        T_bar = np.zeros((self.N * self.q, self.n))
+        Q_bar = np.zeros((self.N * self.q, self.N * self.q))
+        R_bar = np.zeros((self.N * self.m, self.N * self.m))
 
         for k in range(1, self.N + 1):
             for j in range(1, k + 1):
-                S_bar[(k-1)*self.q:k*self.q, (k-j)*self.m:(k-j+1)*self.m] = np.dot(np.dot(self.C, np.linalg.matrix_power(self.A, j-1)), self.B)
+                S_bar[
+                    (k - 1) * self.q : k * self.q,
+                    (k - j) * self.m : (k - j + 1) * self.m,
+                ] = np.dot(
+                    np.dot(self.C, np.linalg.matrix_power(self.A, j - 1)),
+                    self.B,
+                )
 
-            T_bar[(k-1)*self.q:k*self.q, :self.n] = np.dot(self.C, np.linalg.matrix_power(self.A, k))
+            T_bar[(k - 1) * self.q : k * self.q, : self.n] = np.dot(
+                self.C, np.linalg.matrix_power(self.A, k)
+            )
 
-            Q_bar[(k-1)*self.q:k*self.q, (k-1)*self.q:k*self.q] = self.Q
-            R_bar[(k-1)*self.m:k*self.m, (k-1)*self.m:k*self.m] = self.R
+            Q_bar[
+                (k - 1) * self.q : k * self.q, (k - 1) * self.q : k * self.q
+            ] = self.Q
+            R_bar[
+                (k - 1) * self.m : k * self.m, (k - 1) * self.m : k * self.m
+            ] = self.R
 
         return S_bar, T_bar, Q_bar, R_bar
-    
-    def updateSystemMatrices(self,sim,cur_x,cur_u):
+
+    def updateSystemMatrices(self, sim, cur_x, cur_u):
         """
         Get the system matrices A and B according to the dimensions of the state and control input.
-        
+
         Parameters:
         num_states, number of system states
-        num_controls, number oc conttrol inputs
+        num_controls, number oc control inputs
         cur_x, current state around which to linearize
         cur_u, current control input around which to linearize
-       
-        
+
+
         Returns:
         A: State transition matrix
         B: Control input matrix
@@ -62,7 +75,7 @@ class RegulatorModel:
                 "Also, ensure that you implement the linearization logic in the updateSystemMatrices function."
             )
 
-        A =[]
+        A = []
         B = []
         num_states = self.n
         num_controls = self.m
@@ -70,7 +83,7 @@ class RegulatorModel:
         delta_t = sim.GetTimeStep()
         v0 = cur_x[0]
         theta0 = cur_x[2]
-        # get A and B matrices by linearinzing the cotinuous system dynamics
+        # get A and B matrices by linearizing the continuous system dynamics
         # The linearized continuous-time system is:
 
         # \[
@@ -133,10 +146,8 @@ class RegulatorModel:
         # \end{bmatrix}.
         # \]
 
-
-
         # then linearize A and B matrices
-        #\[
+        # \[
         # A = I + \Delta t \cdot A_c,
         # \]
         # \[
@@ -164,17 +175,12 @@ class RegulatorModel:
         # 0 & \Delta t
         # \end{bmatrix}.
         # \]
-        
-        #updating the state and control input matrices
-       
 
+        # updating the state and control input matrices
 
         self.A = A
         self.B = B
         self.C = np.eye(num_outputs)
-        
-
-
 
     # TODO you can change this function to allow for more passing a vector of gains
     def setCostMatrices(self, Qcoeff, Rcoeff):
@@ -209,7 +215,9 @@ class RegulatorModel:
             # Convert Qcoeff to a numpy array
             Qcoeff = np.array(Qcoeff)
             if Qcoeff.ndim != 1 or len(Qcoeff) != num_states:
-                raise ValueError(f"Qcoeff must be a scalar or a 1D array of length {num_states}")
+                raise ValueError(
+                    f"Qcoeff must be a scalar or a 1D array of length {num_states}"
+                )
             # Create a diagonal matrix with Qcoeff as the diagonal elements
             Q = np.diag(Qcoeff)
 
@@ -221,7 +229,9 @@ class RegulatorModel:
             # Convert Rcoeff to a numpy array
             Rcoeff = np.array(Rcoeff)
             if Rcoeff.ndim != 1 or len(Rcoeff) != num_controls:
-                raise ValueError(f"Rcoeff must be a scalar or a 1D array of length {num_controls}")
+                raise ValueError(
+                    f"Rcoeff must be a scalar or a 1D array of length {num_controls}"
+                )
             # Create a diagonal matrix with Rcoeff as the diagonal elements
             R = np.diag(Rcoeff)
 
