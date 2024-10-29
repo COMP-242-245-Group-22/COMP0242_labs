@@ -22,8 +22,22 @@ class Map(object):
         self.landmarks = np.array([
             [5, 10],
             [15, 5],
-            [10, 15]
+            [10, 15],
+            [-10, 10],
+            [-5, 20],
+            [0, 30],
+            # [10, 0],
+            # [0, -10],
+            # [-10, -10],
+            # [-20, 0]
         ])
+        ln = []
+        for i in range(-10, 36, 5):
+            for j in range(-10, 36, 5):
+                ln.append([i, j])
+
+        self.landmarks = np.array(ln)
+                
 
 
 class RobotEstimator(object):
@@ -108,9 +122,66 @@ class RobotEstimator(object):
 
         # State update
         self._x_est = self._x_pred + K @ nu
+        self._x_est[-1] = np.arctan2(np.sin(self._x_est[-1]),
+                                     np.cos(self._x_est[-1]))
 
         # Covariance update
         self._Sigma_est = (np.eye(len(self._x_est)) - K @ C) @ self._Sigma_pred
+        
+
+    def update_from_landmark_range_bearing_observations(self, y_range_bearing):
+
+        # Predicted the landmark measurements and build up the observation Jacobian
+        C = []
+        y_pred = []
+        x_pred = self._x_pred
+        for lm in self._map.landmarks:
+
+            dx_pred = lm[0] - x_pred[0]
+            dy_pred = lm[1] - x_pred[1]
+            range_pred = np.sqrt(dx_pred**2 + dy_pred**2)
+            bearing_pred = np.arctan2(dy_pred, dx_pred) - x_pred[2]
+
+            y_pred.append(range_pred)
+            y_pred.append(bearing_pred)
+
+            # Jacobian of the measurement model
+            C_range = np.array([
+                -(dx_pred) / range_pred,
+                -(dy_pred) / range_pred,
+                0
+            ])
+            c_bearing = np.array([
+                dy_pred / (range_pred * range_pred),
+                -(dx_pred) / (range_pred * range_pred),
+                -1
+            ])
+            C.append(C_range)
+            C.append(c_bearing)
+            # Convert lists to arrays
+        C = np.array(C)
+        y_pred = np.array(y_pred)
+
+        # Innovation. Look new information! (geddit?)
+        nu = y_range_bearing - y_pred
+        new_nu = []
+        i = 0
+        for nn in nu:
+            if i % 2 == 1:
+                new_nu.append(np.arctan2(np.sin(nn), np.cos(nn)))
+            else:
+                new_nu.append(nn)
+            i += 1
+        nu = np.array(new_nu)
+
+        # Since we are oberving a bunch of landmarks
+        # build the covariance matrix. Note you could
+        # swap this to just calling the ekf update call
+        # multiple times, once for each observation,
+        # as well
+        W_landmarks = np.diag([self._config.W_range, self._config.W_bearing]*len(self._map.landmarks))
+        self._do_kf_update(nu, C, W_landmarks)
+
 
     def update_from_landmark_range_observations(self, y_range):
 
@@ -147,6 +218,41 @@ class RobotEstimator(object):
         W_landmarks = self._config.W_range * np.eye(len(self._map.landmarks))
         self._do_kf_update(nu, C, W_landmarks)
 
-        # Angle wrap afterwards
-        self._x_est[-1] = np.arctan2(np.sin(self._x_est[-1]),
-                                     np.cos(self._x_est[-1]))
+
+    def update_from_landmark_bearing_observations(self, y_bearing):
+        # Predicted the landmark measurements and build up the observation Jacobian
+        y_pred = []
+        C = []
+        x_pred = self._x_pred
+        for lm in self._map.landmarks:
+
+            dx_pred = lm[0] - x_pred[0]
+            dy_pred = lm[1] - x_pred[1]
+            range_pred = np.sqrt(dx_pred**2 + dy_pred**2)
+            bearing_pred = np.arctan2(dy_pred, dx_pred) - x_pred[2]
+            y_pred.append(bearing_pred)
+
+            # Jacobian of the measurement model
+            c_bearing = np.array([
+                dy_pred / (range_pred * range_pred),
+                -(dx_pred) / (range_pred * range_pred),
+                -1
+            ])
+            C.append(c_bearing)
+        # Convert lists to arrays
+        C = np.array(C)
+        y_pred = np.array(y_pred)
+
+        # Innovation. Look new information! (geddit?)
+        nu = y_bearing - y_pred
+        nu = np.arctan2(np.sin(nu), np.cos(nu))
+
+
+        # Since we are oberving a bunch of landmarks
+        # build the covariance matrix. Note you could
+        # swap this to just calling the ekf update call
+        # multiple times, once for each observation,
+        # as well
+        W_landmarks = self._config.W_range * np.eye(len(self._map.landmarks))
+        self._do_kf_update(nu, C, W_landmarks)
+                                     

@@ -67,9 +67,25 @@ class RegulatorModel:
         num_states = self.n
         num_controls = self.m
         num_outputs = self.q
-        delta_t = sim.GetTimeStep()
-        v0 = cur_x[0]
-        theta0 = cur_x[2]
+        time_step = sim.GetTimeStep()
+
+
+        A = np.eye(num_states)
+        B = np.array([[time_step, 0], [0, 0], [0, time_step]])
+
+
+        A = np.array([
+            [1, 0, (-cur_u[0]) * np.sin(cur_x[2]) * time_step], 
+            [0, 1, cur_u[0] * np.cos(cur_x[2]) * time_step], 
+            [0, 0, 1]
+        ])
+
+        B = np.array([
+            [np.cos(cur_x[2]) * time_step, 0], 
+            [np.sin(cur_x[2]) * time_step, 0], 
+            [0, time_step]])
+        #print('shape: ', B.shape)
+        
         # get A and B matrices by linearinzing the cotinuous system dynamics
         # The linearized continuous-time system is:
 
@@ -166,15 +182,10 @@ class RegulatorModel:
         # \]
         
         #updating the state and control input matrices
-       
-
-
         self.A = A
         self.B = B
         self.C = np.eye(num_outputs)
         
-
-
 
     # TODO you can change this function to allow for more passing a vector of gains
     def setCostMatrices(self, Qcoeff, Rcoeff):

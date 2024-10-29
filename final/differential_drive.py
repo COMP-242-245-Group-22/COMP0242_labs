@@ -51,7 +51,7 @@ def quaternion2bearing(q_w, q_x, q_y, q_z):
 def init_simulator(conf_file_name):
     """Initialize simulation and dynamic model."""
     cur_dir = os.path.dirname(os.path.abspath(__file__))
-    sim = pb.SimInterface(conf_file_name, conf_file_path_ext=cur_dir)
+    sim = pb.SimInterface(conf_file_name, conf_file_path_ext=cur_dir, use_gui=False)
     
     ext_names = np.expand_dims(np.array(sim.getNameActiveJoints()), axis=0)
     source_names = ["pybullet"]
@@ -89,7 +89,7 @@ def main():
     C = np.eye(num_states)
     
     # Horizon length
-    N_mpc = 10
+    N_mpc = 20
 
     # Initialize the regulator model
     regulator = RegulatorModel(N_mpc, num_states, num_controls, num_states)
@@ -99,12 +99,18 @@ def main():
     # or you can linearize around the current state and control of the robot
     # in the second case case you need to update the matrices A and B at each time step
     # and recall everytime the method updateSystemMatrices
-    init_pos  = np.array([2.0, 3.0])
+
+    #state_x_for_linearization = sim.GetBasePosition()
+    #cur_u_for_linearization = [0, 0]
+    #regulator.updateSystemMatrices(sim,state_x_for_linearization,cur_u_for_linearization)
+
+    init_pos  = np.array([-2.0, 3.0])
     init_quat = np.array([0,0,0.3827,0.9239])
     init_base_bearing_ = quaternion2bearing(init_quat[3], init_quat[0], init_quat[1], init_quat[2])
     cur_state_x_for_linearization = [init_pos[0], init_pos[1], init_base_bearing_]
     cur_u_for_linearization = np.zeros(num_controls)
     regulator.updateSystemMatrices(sim,cur_state_x_for_linearization,cur_u_for_linearization)
+
     # Define the cost matrices
     Qcoeff = np.array([310, 310, 80.0])
     Rcoeff = 0.5
@@ -120,18 +126,20 @@ def main():
     ##### MPC control action #######
     v_linear = 0.0
     v_angular = 0.0
+
+    # Figure out what the controller should do next
+    # MPC section/ low level controller section ##################################################################
     cmd = MotorCommands()  # Initialize command structure for motors
-    init_angular_wheels_velocity_cmd = np.array([0.0, 0.0, 0.0, 0.0])
-    init_interface_all_wheels = ["velocity", "velocity", "velocity", "velocity"]
-    cmd.SetControlCmd(init_angular_wheels_velocity_cmd, init_interface_all_wheels)
-    
+
+    pos_mes_all = []
+    u_mpc = [0, 0]
+
     while True:
 
 
         # True state propagation (with process noise)
         ##### advance simulation ##################################################################
-        sim.Step(cmd, "torque")
-        time_step = sim.GetTimeStep()
+        
 
         # Kalman filter prediction
        
@@ -148,30 +156,33 @@ def main():
         base_ori = sim.GetBaseOrientation()
         base_bearing_ = quaternion2bearing(base_ori[3], base_ori[0], base_ori[1], base_ori[2])
         y = landmark_range_observations(base_pos)
+
+        #print('base pos: ', base_pos)
+        #print('base bearing: ', base_bearing_)
+        pos_mes_all.append(base_pos[:2])
+
     
         # Update the filter with the latest observations
         
     
         # Get the current state estimate
-        
-
-        # Figure out what the controller should do next
-        # MPC section/ low level controller section ##################################################################
-       
    
         # Compute the matrices needed for MPC optimization
         # TODO here you want to update the matrices A and B at each time step if you want to linearize around the current points
+
+        regulator.updateSystemMatrices(sim, base_pos, u_mpc)
+
         # add this 3 lines if you want to update the A and B matrices at each time step 
         #cur_state_x_for_linearization = [base_pos[0], base_pos[1], base_bearing_]
         #cur_u_for_linearization = u_mpc
         #regulator.updateSystemMatrices(sim,cur_state_x_for_linearization,cur_u_for_linearization)
         S_bar, T_bar, Q_bar, R_bar = regulator.propagation_model_regulator_fixed_std()
         H,F = regulator.compute_H_and_F(S_bar, T_bar, Q_bar, R_bar)
-        x0_mpc = np.hstack((base_pos[:2], base_bearing_))
-        x0_mpc = x0_mpc.flatten()
+        #x0_mpc = np.vstack((base_pos[:2], base_bearing_))
+        #x0_mpc = x0_mpc.flatten()
         # Compute the optimal control sequence
         H_inv = np.linalg.inv(H)
-        u_mpc = -H_inv @ F @ x0_mpc
+        u_mpc = -H_inv @ F @ base_pos # x0_mpc
         # Return the optimal control sequence
         u_mpc = u_mpc[0:num_controls] 
         # Prepare control command to send to the low level controller
@@ -179,6 +190,9 @@ def main():
         angular_wheels_velocity_cmd = np.array([right_wheel_velocity, left_wheel_velocity, left_wheel_velocity, right_wheel_velocity])
         interface_all_wheels = ["velocity", "velocity", "velocity", "velocity"]
         cmd.SetControlCmd(angular_wheels_velocity_cmd, interface_all_wheels)
+
+        sim.Step(cmd, "torque")
+        time_step = sim.GetTimeStep()
 
 
         # Exit logic with 'q' key (unchanged)
@@ -194,10 +208,18 @@ def main():
 
         # Update current time
         current_time += time_step
+        if current_time > 10:
+            break
 
 
     # Plotting 
     #add visualization of final x, y, trajectory and theta
+    plt.plot([row[0] for row in pos_mes_all], [row[1] for row in pos_mes_all], 'bo')  # 'bo' means blue dots
+    plt.xlabel('x')
+    plt.ylabel('f(x)')
+    plt.title('Plot of f(x) = x^2')
+    plt.grid(True)
+    plt.show()
     
     
     
