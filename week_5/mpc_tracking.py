@@ -84,6 +84,15 @@ def getSystemMatrices(sim, num_joints, damping_coefficients=None):
 # damping_coefficients = [0.1, 0.1, 0.1, 0.05, 0.05, 0.05]  # Example damping coefficients
 # A, B = getSystemMatrices(sim, num_joints, damping_coefficients)
 
+# Perfect fit
+# P = 10000
+# V = 10
+# E = 0.1
+
+P = 10000
+V = 10
+E = 0.1
+
 
 def getCostMatrices(num_joints):
     """
@@ -97,12 +106,88 @@ def getCostMatrices(num_joints):
     num_controls = num_joints
     
     # Q = 1 * np.eye(num_states)  # State cost matrix
-    Q = 1000 * np.eye(num_states)
-    #Q[num_joints:, num_joints:] = 0.0
+    Q = P * np.eye(num_states)
+    Q[num_joints:, num_joints:] = V * np.eye(num_joints)
+    print(Q)
     
-    R = 0.1 * np.eye(num_controls)  # Control input cost matrix
-    
+    R = E * np.eye(num_controls)  # Control input cost matrix
     return Q, R
+
+class CustomArcReference:
+    def __init__(self):
+        self.start_x = np.random.uniform(-4, -1, 7)
+
+    # Arctan-like Function
+    # Function: f(x) = 0.5 + x / (1 + x^2)
+    # Derivative: f'(x) = (1 - x^2) / (1 + x^2)^2
+    def get_values(self, cur_time):
+        """
+        Calculate the position and velocity at a given time.
+
+        Parameters:
+        cur_time float: The time at which to evaluate the position and velocity.
+
+        Returns:
+        tuple: The position and velocity at the given time.
+        """
+        x = self.start_x + np.array([cur_time]*7) 
+        q_d = 0.5 + x / (1 + x ** 2)
+        # Calculate the derivative of the position (velocity)
+        qd_d = (np.array([1]*7) - x**2) / ((np.array([1]*7) + x**2)**2)
+        return q_d, qd_d
+
+
+class CustomMexReference:
+    def __init__(self):
+        self.start_x = np.random.uniform(-4, -1, 7)
+
+    # Mexican hat function
+    # Function: f(x) = 1 + (-x^2) * e^(-x^2/2)
+    # Derivative: f'(x) = e^(-x^2/2) * (-x - x^3)
+    def get_values(self, cur_time):
+        """
+        Calculate the position and velocity at a given time.
+
+        Parameters:
+        cur_time float: The time at which to evaluate the position and velocity.
+
+        Returns:
+        tuple: The position and velocity at the given time.
+        """
+        x = self.start_x + np.array([cur_time]*7) 
+        ones = np.array([1]*7)
+        es = np.array([np.e]*7)
+
+        q_d = 1 + (-x**2) * (es ** (-x**2 / 2))
+        # Calculate the derivative of the position (velocity)
+        qd_d = (es**(-x**2 / 2)) * (x**3 - 2*x)
+        return q_d, qd_d
+
+
+class CustomLinReference:
+    def __init__(self):
+        self.start_x = np.random.uniform(-4, -1, 7)
+
+    # Linear function
+    # Function: f(x) = 0.5 + 0.1x
+    # Derivative: f'(x) = 0.1
+    def get_values(self, cur_time):
+        """
+        Calculate the position and velocity at a given time.
+
+        Parameters:
+        cur_time float: The time at which to evaluate the position and velocity.
+
+        Returns:
+        tuple: The position and velocity at the given time.
+        """
+        x = self.start_x + np.array([cur_time]*7) 
+
+        q_d = 0.5 + 0.1 * x
+        # Calculate the derivative of the position (velocity)
+        qd_d = np.array([0.1]*7)
+        return q_d, qd_d
+
 
 
 def main():
@@ -118,7 +203,7 @@ def main():
     print_joint_info(sim, dyn_model, controlled_frame_name)
     
     # Initialize data storage
-    q_mes_all, qd_mes_all, q_d_all, qd_d_all = [], [], [], []
+    q_mes_all, qd_mes_all, q_d_all, qd_d_all, qdd_d_all, tau_d_all = [], [], [], [], [], []
     regressor_all = np.array([])
     
     # Measuring all the state
@@ -149,6 +234,12 @@ def main():
     amplitude = np.array(amplitudes)
     frequency = np.array(frequencies)
     ref = SinusoidalReference(amplitude, frequency, sim.GetInitMotorAngles())  # Initialize the reference
+    # TO USE MEXICAN HAT TRAJECTORY UNCOMMENT:
+    # ref = CustomMexReference() 
+    # TO USE ARCTAN-LIKE TRAJECTORY UNCOMMENT:
+    # ref = CustomArcReference()
+    # TO USE LINEAR HAT TRAJECTORY UNCOMMENT:
+    # ref = CustomLinReference()
 
 
     # Main control loop
@@ -189,13 +280,17 @@ def main():
         # Return the optimal control sequence
         u_mpc += u_star[:num_joints]
 
+        qdd_d_all.append(np.array(u_mpc))
+
         prev_x0_mpc = x0_mpc
        
         # Control command
-        cmd.tau_cmd = dyn_cancel(dyn_model, q_mes, qd_mes, u_mpc)
+        tau_cmd = dyn_cancel(dyn_model, q_mes, qd_mes, u_mpc)
+        cmd.SetControlCmd(tau_cmd, ["torque"]*7)
         sim.Step(cmd, "torque")  # Simulation step with torque command
 
-        # print(cmd.tau_cmd)
+        tau_d_all.append(tau_cmd)
+
         # Exit logic with 'q' key
         keys = sim.GetPyBulletClient().getKeyboardEvents()
         qKey = ord('q')
@@ -218,6 +313,23 @@ def main():
     # Plotting
     for i in range(num_joints):
         plt.figure(figsize=(10, 8))
+        plt.subplot(2, 1, 1)
+        plt.plot([qd[i] for qd in qdd_d_all], label=f'Desired Acceleration - Joint {i+1}', linestyle='--')
+        plt.title(f'Acceleration for Joint {i+1}')
+        plt.xlabel('Time steps')
+        plt.ylabel('Acceleration')
+        plt.legend()
+
+        plt.subplot(2, 1, 2)
+        plt.plot([qd[i] for qd in tau_d_all], label=f'Applied Torque - Joint {i+1}', linestyle='--')
+        plt.title(f'Torque for Joint {i+1}')
+        plt.xlabel('Time steps')
+        plt.ylabel('Torque')
+        plt.legend()
+        plt.tight_layout()
+
+
+        plt.figure(figsize=(10, 8))
         
         # Position plot for joint i
         plt.subplot(2, 1, 1)
@@ -239,7 +351,8 @@ def main():
 
         plt.tight_layout()
 
-        plt.savefig(f'plots/joint_{i}_Qp_1000_Qv_1000.png')
+        plt.savefig(f'plots/joint_{i}_Qp_{P}_Qv_{V}_R_{E}.png')
+
         plt.show()
     
      
