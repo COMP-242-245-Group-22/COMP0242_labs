@@ -37,6 +37,8 @@ def simulate_with_given_pid_values(
     # here we reset the simulator each time we start a new test
     sim_.ResetPose()
 
+    # kp_vec = np.array([100.0] * dyn_model.getNumberofActuatedJoints())
+    # kp_vec[joint_id] = kp
     kp_vec = np.array([15.0] * dyn_model.getNumberofActuatedJoints())
     # updating the kp value for the joint we want to tune
     if isinstance(kp, np.ndarray):
@@ -44,6 +46,8 @@ def simulate_with_given_pid_values(
     elif isinstance(kp, float) or isinstance(kp, int):
         kp_vec[joint_id] = kp
 
+    # kd_vec = np.array([30.0]*dyn_model.getNumberofActuatedJoints())
+    # kd_vec[joint_id] = 0.0
     kd_vec = np.array([0.0] * dyn_model.getNumberofActuatedJoints())
     if isinstance(kd, np.ndarray):
         kd_vec = kd
@@ -75,9 +79,10 @@ def simulate_with_given_pid_values(
         # Ensure q_init is within the range of the amplitude
 
         # Control command
-        cmd.tau_cmd = feedback_lin_ctrl(
+        tau_cmd = feedback_lin_ctrl(
             dyn_model, q_mes, qd_mes, q_des, qd_des, kp_vec, kd_vec
         )  # Zero torque command
+        cmd.SetControlCmd(tau_cmd, ["torque"] * 7)
         sim_.Step(cmd, "torque")  # Simulation step with torque command
 
         # Exit logic with 'q' key
@@ -103,7 +108,7 @@ def simulate_with_given_pid_values(
         # time.sleep(0.01)  # Slow down the loop for better visualization
         # get real time
         current_time += time_step
-        # print("current time in seconds", current_time)
+        # print("current time in seconds",current_time)
 
     # make the plot for the current joint
     if plot:
@@ -113,6 +118,9 @@ def simulate_with_given_pid_values(
 
 
 def perform_frequency_analysis(data, dt, show=True):
+
+    # remove the average from the data signal!
+
     n = len(data)
     yf = fft(data)
     xf = fftfreq(n, dt)[: n // 2]
