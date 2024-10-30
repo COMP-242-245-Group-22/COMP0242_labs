@@ -81,7 +81,7 @@ class RegulatorModel:
         num_controls = self.m
         num_outputs = self.q
         delta_t = sim.GetTimeStep()
-        v0 = cur_x[0]
+        v0 = cur_u[0]
         theta0 = cur_x[2]
         # get A and B matrices by linearizing the continuous system dynamics
         # The linearized continuous-time system is:
