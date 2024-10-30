@@ -8,6 +8,11 @@ configs/
 .pytest_cache/
 __pycache__/
 
-simulation_and_control/
 *.rsls*
+
+overleaf/
 67*/
+*.aux
+*.log
+*.out
+*.synctex.gz
