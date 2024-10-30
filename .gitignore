@@ -4,5 +4,3 @@ models/
 
 # Ignore the egg-info directory
 configs/
-
-simulation_and_control/
