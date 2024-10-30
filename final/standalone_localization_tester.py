@@ -4,13 +4,12 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-from robot_localization_system import FilterConfiguration, Map, RobotEstimator
-
-TASK = 1
-ACT = 3
-EXT = "pdf"
-DIR = f"final/figures/task{TASK}/act{ACT}"
-os.makedirs(DIR, exist_ok=True)
+from robot_localization_system import (
+    FilterConfiguration,
+    Map,
+    RobotEstimator,
+    wrap_angle,
+)
 
 
 class SimulatorConfiguration(object):
@@ -84,7 +83,6 @@ class Simulator(object):
     def landmark_range_observations(self):
         """Get the observations to the landmarks. Return None if none visible"""
         y = []
-        C = []
         W = self._filter_config.W_range
         for lm in self._map.landmarks:
             # True range measurement (with noise)
@@ -93,30 +91,34 @@ class Simulator(object):
             range_true = np.sqrt(dx**2 + dy**2)
             range_meas = range_true + np.random.normal(0, np.sqrt(W))
             y.append(range_meas)
-
-        y = np.array(y)
-        return y
+        return np.array(y)
 
     def landmark_range_bearing_observations(self):
         """Get the observations to the landmarks and bearings. Return None if none visible"""
         y = []
-        C = []
-        W_range = self._filter_config.W_range
-        W_bearing = self._filter_config.W_bearing
+        W = self._filter_config.W_range_bearing
         for lm in self._map.landmarks:
             # True range measurement (with noise)
             dx = lm[0] - self._x_true[0]
             dy = lm[1] - self._x_true[1]
             range_true = np.sqrt(dx**2 + dy**2)
-            range_meas = range_true + np.random.normal(0, np.sqrt(W_range))
-            y.append(range_meas)
-
-        y = np.array(y)
-        return y
+            range_meas = range_true + np.random.normal(0, np.sqrt(W[0, 0]))
+            bearing_true = np.arctan2(dy, dx) - self._x_true[2]
+            bearing_meas = bearing_true + np.random.normal(0, np.sqrt(W[1, 1]))
+            y.append([range_meas, bearing_meas])
+        return np.array(y)
 
     def x_true(self):
         return self._x_true
 
+
+TASK = 1
+ACT = 3
+EXT = "pdf"  # figure file extension
+CUR_DIR = os.path.dirname(os.path.realpath(__file__))
+DIR = os.path.join(CUR_DIR, "figures", f"task{TASK}", f"act{ACT}")  # figure dir
+os.makedirs(DIR, exist_ok=True)
+print(f"Performing Task {TASK} Activity {ACT}...")
 
 # Create the simulator configuration.
 sim_config = SimulatorConfiguration()
@@ -127,10 +129,11 @@ filter_config = FilterConfiguration()
 # Create the map object for the landmarks.
 _map = Map()
 if ACT == 2:
-    num_landmarks = 20
+    num_landmarks = 13**2
     _map.use_more_landmarks(num_landmarks)
-elif ACT == 3:
-    pass
+elif ACT == 4:
+    num_landmarks = 7**2
+    _map.use_more_landmarks(num_landmarks)
 
 # Create the controller. This just provides fixed control inputs for now.
 controller = Controller(sim_config)
@@ -154,7 +157,6 @@ Sigma_est_history = []
 
 # Main loop
 for step in range(sim_config.time_steps):
-
     # Set the control input and propagate the step the simulator with that control input.
     simulator.set_control_input(u)
     simulation_time = simulator.step()
@@ -164,10 +166,13 @@ for step in range(sim_config.time_steps):
     estimator.predict_to(simulation_time)
 
     # Get the landmark observations.
-    y = simulator.landmark_range_observations()
-
     # Update the filter with the latest observations.
-    estimator.update_from_landmark_range_observations(y)
+    if ACT in [1, 2]:
+        y = simulator.landmark_range_observations()
+        estimator.update_from_landmark_range_observations(y)
+    elif ACT in [3, 4]:
+        y = simulator.landmark_range_bearing_observations()
+        estimator.update_from_landmark_range_bearing_observations(y)
 
     # Get the current state estimate.
     x_est, Sigma_est = estimator.estimate()
@@ -181,9 +186,9 @@ for step in range(sim_config.time_steps):
     Sigma_est_history.append(np.diagonal(Sigma_est))
 
 # Convert history lists to arrays.
-x_true_history = np.array(x_true_history)
-x_est_history = np.array(x_est_history)
-Sigma_est_history = np.array(Sigma_est_history)
+x_true_history = np.array(x_true_history[1:])
+x_est_history = np.array(x_est_history[1:])
+Sigma_est_history = np.array(Sigma_est_history[1:])
 
 # Plotting the true path, estimated path, and landmarks.
 plt.figure()
@@ -194,22 +199,17 @@ plt.scatter(
     _map.landmarks[:, 1],
     marker="x",
     color="red",
-    label=f"{num_landmarks**2 if ACT == 2 else 3} Landmarks",
+    label=f"{num_landmarks if ACT in [2, 4] else 3} Landmarks",
 )
 plt.legend()
-plt.xlabel("X position [m]")
-plt.ylabel("Y position [m]")
+plt.xlabel("X position (m)")
+plt.ylabel("Y position (m)")
 plt.title("Unicycle Robot Localization using EKF")
 plt.axis("equal")
 plt.grid(True)
 plt.savefig(f"{DIR}/robot_localization.{EXT}")
 # plt.show()
 plt.close()
-
-
-def wrap_angle(angle):
-    """Note the angle state theta experiences "angles wrapping". This small helper function is used to address the issue."""
-    return np.arctan2(np.sin(angle), np.cos(angle))
 
 
 # Plot the 2 standard deviation and error history for each state.
@@ -220,24 +220,25 @@ for s in range(3):
     plt.figure()
     two_sigma = 2 * np.sqrt(Sigma_est_history[:, s])
     plt.plot(estimation_error[:, s], label="Estimation Error")
-    plt.plot(two_sigma, linestyle="dashed", color="red", label="$\pm 2\sigma$")
-    plt.plot(-two_sigma, linestyle="dashed", color="red")
-    if state_name[s] != "θ":
+    plt.plot(two_sigma, linestyle="dashed", color="r", label="$\pm 2\sigma$")
+    plt.plot(-two_sigma, linestyle="dashed", color="r")
+    plt.xlabel("Time Step (ms)")
+    plt.ylabel(f"Estimation Error ({'m' if state_name[s] != 'θ' else 'rad'})")
+    plt.title(state_name[s])
+    if state_name[s] in ["x", "y"]:
         plt.hlines(
-            0.10,
+            [0.10, -0.10],
             0,
-            sim_config.time_steps,
-            linestyle="dotted",
+            1,
+            transform=plt.gca().get_yaxis_transform(),
             color="orange",
+            linestyles="dashdot",
             label="10 cm Threshold",
         )
-        plt.hlines(
-            -0.10, 0, sim_config.time_steps, linestyle="dotted", color="orange"
+        plt.title(
+            f"{state_name[s]} (Threshold{' ' if np.all(two_sigma < 0.10) else ' Not '}Met)"
         )
     plt.legend()
-    plt.xlabel("Time Step")
-    plt.ylabel(f"Estimation Error [{'m' if state_name[s] != 'θ' else 'rad'}]")
-    plt.title(state_name[s])
     plt.savefig(f"{DIR}/{state_name[s]}.{EXT}")
     # plt.show()
     plt.close()

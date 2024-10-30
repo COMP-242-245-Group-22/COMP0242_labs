@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 
-import matplotlib.pyplot as plt
 import numpy as np
+
+
+def wrap_angle(angle):
+    """Note the angle state theta experiences "angles wrapping". This small helper function is used to address the issue."""
+    return np.arctan2(np.sin(angle), np.cos(angle))
 
 
 class FilterConfiguration(object):
     def __init__(self):
         # Process and measurement noise covariance matrices
         self.V = np.diag([0.1, 0.1, 0.05]) ** 2  # Process noise covariance
-        # Measurement noise variance (range measurements)
+        # Measurement noise variance (range and bearing measurements)
         self.W_range = 0.5**2
         self.W_bearing = (np.pi * 0.5 / 180.0) ** 2
+        self.W_range_bearing = np.diag([self.W_range, self.W_bearing])
 
         # Initial conditions for the filter
         self.x0 = np.array([2.0, 3.0, np.pi / 4])
@@ -22,9 +27,13 @@ class Map(object):
         self.landmarks = np.array([[5, 10], [15, 5], [10, 15]])
 
     def use_more_landmarks(self, n):
-        # nxn grid of landmarks centered at the origin
-        self.landmarks = np.array(
-            [[i, j] for i in range(-n, n, 2) for j in range(-n, n, 2)]
+        """Apply a grid of n landmarks centered at the origin"""
+        n = int(np.sqrt(n))
+        self.landmarks = (
+            np.array(
+                [[i - n // 2, j - n // 2] for i in range(n) for j in range(n)]
+            )
+            * 25
         )
 
 
@@ -82,9 +91,7 @@ class RobotEstimator(object):
                 omega_c * dt,
             ]
         )
-        self._x_pred[-1] = np.arctan2(
-            np.sin(self._x_pred[-1]), np.cos(self._x_pred[-1])
-        )
+        self._x_pred[-1] = wrap_angle(self._x_pred[-1])
 
         # Predict the covariance
         A = np.array(
@@ -97,13 +104,12 @@ class RobotEstimator(object):
 
         self._kf_predict_covariance(A, self._config.V * dt)
 
-    # Predict the EKF covariance; note the mean is totally model specific, so there's nothing we can clearly separate out.
     def _kf_predict_covariance(self, A, V):
+        """Predict the EKF covariance; note the mean is totally model specific, so there's nothing we can clearly separate out."""
         self._Sigma_pred = A @ self._Sigma_est @ A.T + V
 
-    # Implement the Kalman filter update step.
     def _do_kf_update(self, nu, C, W):
-
+        """Implement the Kalman filter update step."""
         # Kalman Gain
         SigmaXZ = self._Sigma_pred @ C.T
         SigmaZZ = C @ SigmaXZ + W
@@ -117,11 +123,10 @@ class RobotEstimator(object):
 
     def update_from_landmark_range_observations(self, y_range):
         # Predicted the landmark measurements and build up the observation Jacobian
+        x_pred = self._x_pred
         y_pred = []
         C = []
-        x_pred = self._x_pred
         for lm in self._map.landmarks:
-
             dx_pred = lm[0] - x_pred[0]
             dy_pred = lm[1] - x_pred[1]
             range_pred = np.sqrt(dx_pred**2 + dy_pred**2)
@@ -144,41 +149,41 @@ class RobotEstimator(object):
         self._do_kf_update(nu, C, W_landmarks)
 
         # Angle wrap afterwards
-        self._x_est[-1] = np.arctan2(
-            np.sin(self._x_est[-1]), np.cos(self._x_est[-1])
-        )
+        self._x_est[-1] = wrap_angle(self._x_est[-1])
 
-    def update_from_landmark_range_bearing_observations(
-        self, y_range, y_bearing
-    ):
+    def update_from_landmark_range_bearing_observations(self, y_range_bearing):
         # Predicted the landmark measurements and build up the observation Jacobian
+        x_pred = self._x_pred
         y_pred = []
         C = []
-        x_pred = self._x_pred
         for lm in self._map.landmarks:
-
             dx_pred = lm[0] - x_pred[0]
             dy_pred = lm[1] - x_pred[1]
             range_pred = np.sqrt(dx_pred**2 + dy_pred**2)
-            y_pred.append(range_pred)
+            bearing_pred = np.arctan2(dy_pred, dx_pred) - x_pred[2]
+            y_pred.append([range_pred, bearing_pred])
 
             # Jacobian of the measurement model
-            C_range = np.array(
-                [-(dx_pred) / range_pred, -(dy_pred) / range_pred, 0]
+            C_range_bearing = np.array(
+                [
+                    [-(dx_pred) / range_pred, -(dy_pred) / range_pred, 0],
+                    [dy_pred / (range_pred**2), -dx_pred / (range_pred**2), -1],
+                ]
             )
-            C.append(C_range)
+            C.append(C_range_bearing)
         # Convert lists to arrays
         C = np.array(C)
         y_pred = np.array(y_pred)
 
         # Innovation. Look new information! (geddit?)
-        nu = y_range - y_pred
+        nu = y_range_bearing - y_pred
+        nu[:, 1] = wrap_angle(nu[:, 1])
 
         # Since we are observing a bunch of landmarks build the covariance matrix. Note you could swap this to just calling the ekf update call multiple times, once for each observation, as well
-        W_landmarks = self._config.W_range * np.eye(len(self._map.landmarks))
-        self._do_kf_update(nu, C, W_landmarks)
+        W_landmarks = np.kron(
+            np.eye(len(self._map.landmarks)), self._config.W_range_bearing
+        )
+        self._do_kf_update(nu.flatten(), C.reshape(-1, 3), W_landmarks)
 
         # Angle wrap afterwards
-        self._x_est[-1] = np.arctan2(
-            np.sin(self._x_est[-1]), np.cos(self._x_est[-1])
-        )
+        self._x_est[-1] = wrap_angle(self._x_est[-1])
