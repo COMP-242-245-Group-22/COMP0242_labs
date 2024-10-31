@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 
 class FilterConfiguration(object):
-    def __init__(self):
+    def __init__(self, init_pos = [2.0, 3.0, np.pi / 4]):
         # Process and measurement noise covariance matrices
         self.V = np.diag([0.1, 0.1, 0.05]) ** 2  # Process noise covariance
         # Measurement noise variance (range measurements)
@@ -13,28 +13,33 @@ class FilterConfiguration(object):
         self.W_bearing = (np.pi * 0.5 / 180.0) ** 2
 
         # Initial conditions for the filter
-        self.x0 = np.array([2.0, 3.0, np.pi / 4])
+        self.x0 = np.array(init_pos)  # np.array([2.0, 3.0, np.pi / 4])
         self.Sigma0 = np.diag([1.0, 1.0, 0.5]) ** 2
 
 
 class Map(object):
     def __init__(self):
         self.landmarks = np.array([
-            [5, 10],
-            [15, 5],
-            [10, 15],
-            [-10, 10],
-            [-5, 20],
-            [0, 30],
+            # [5, 10],
+            # [15, 5],
+            # [10, 15],
+            [2.5, 3.5],
+            [2, 2],
+            [1, 3],
+            #[-10, 10],
+            #[-5, 20],
+            #[0, 30],
             # [10, 0],
             # [0, -10],
             # [-10, -10],
             # [-20, 0]
         ])
         ln = []
-        for i in range(-10, 36, 5):
-            for j in range(-10, 36, 5):
-                ln.append([i, j])
+        for i in range(1, 6, 1):
+            for j in range(1, 6, 1):
+                if (i == 2 and j == 4):
+                    continue
+                ln.append([1. + i*0.5, 1. + j*0.5])
 
         self.landmarks = np.array(ln)
                 
@@ -127,6 +132,8 @@ class RobotEstimator(object):
 
         # Covariance update
         self._Sigma_est = (np.eye(len(self._x_est)) - K @ C) @ self._Sigma_pred
+
+        #print('Sigma: ', self._Sigma_est)
         
 
     def update_from_landmark_range_bearing_observations(self, y_range_bearing):
