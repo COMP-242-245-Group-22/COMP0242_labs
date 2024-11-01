@@ -149,178 +149,125 @@ def main():
     conf_file_name = "robotnik.json"  # Configuration file for the robot
     sim,dyn_model,num_joints=init_simulator(conf_file_name)
 
-    # adjusting floor friction
-    floor_friction = 100000000
-    sim.SetFloorFriction(floor_friction)
-    # getting time step
+    sim.SetFloorFriction(100)
     time_step = sim.GetTimeStep()
-    current_time = 0
-
-   
-    # Initialize data storage
-    base_pos_all, base_bearing_all = [], []#
-
-    # initializing MPC
-     # Define the matrices
-    num_states = 3
-    num_controls = 2
-   
-    
-    # Measuring all the state
-    
-    C = np.eye(num_states)
-    
-    # Horizon length
-    N_mpc = 10
-
-    # Initialize the regulator model
-    regulator = RegulatorModel(N_mpc, num_states, num_controls, num_states)
-    # update A,B,C matrices
-    # TODO provide state_x_for_linearization,cur_u_for_linearization to linearize the system
-    # you can linearize around the final state and control of the robot (everything zero)
-    # or you can linearize around the current state and control of the robot
-    # in the second case case you need to update the matrices A and B at each time step
-    # and recall everytime the method updateSystemMatrices
-
-    init_pos = np.array(sim.GetBasePosition()[:2])
-    init_quat = sim.GetBaseOrientation()
-    init_base_bearing_ = quaternion2bearing(init_quat[3], init_quat[0], init_quat[1], init_quat[2])
-    cur_state_x_for_linearization = [init_pos[0], init_pos[1], init_base_bearing_]
-    cur_u_for_linearization = np.zeros(num_controls)
-    regulator.updateSystemMatrices(sim,cur_state_x_for_linearization,cur_u_for_linearization)
-
-    # Define the cost matrices
-    Qcoeff = np.array([310, 310, 310.0])
-    Rcoeff = 0.5
-    regulator.setCostMatrices(Qcoeff,Rcoeff)
-   
-
-    u_mpc = np.zeros(num_controls)
-
-    ##### robot parameters ########
     wheel_radius = 0.11
     wheel_base_width = 0.46
-  
-    ##### MPC control action #######
-    v_linear = 0.0
-    v_angular = 0.0
 
-    # Figure out what the controller should do next
-    # MPC section/ low level controller section ##################################################################
-    cmd = MotorCommands()  # Initialize command structure for motors
+    # MPC: might be tuned
+    N_mpc = 10
+    Qcoeff = np.array([310, 310, 300.0])
+    Rcoeff = 0.5
 
+    # MPC: no need to tune
+    num_states = 3
+    num_controls = 2
+    init_pos = np.array(sim.bot[0].base_position[:2])
+    init_quat = sim.bot[0].base_orientation
+    init_base_bearing_ = quaternion2bearing(init_quat[3], init_quat[0], init_quat[1], init_quat[2])
+    x_est = [init_pos[0], init_pos[1], init_base_bearing_]
+    u_mpc = np.zeros(num_controls)
+
+    regulator = RegulatorModel(N_mpc, num_states, num_controls, num_states)
+    regulator.updateSystemMatrices(sim, x_est, u_mpc)
+    regulator.setCostMatrices(Qcoeff,Rcoeff)
+
+    # EKF: no need to tune
+    filter_config = FilterConfiguration(x_est)
+    map = Map()
+    estimator = RobotEstimator(filter_config, map)
+    estimator.start()
+    obs = Observations(filter_config, map)
+    
     x_true_history = []
     x_est_history = []
     Sigma_est_history = []
-    u_mpc = [0, 0]
-
-    # EKF
-    # Create the estimator and start it.
-    filter_config = FilterConfiguration(cur_state_x_for_linearization)
-    map = Map()
-    
-    estimator = RobotEstimator(filter_config, map)
-    estimator.start()
-
-    obs = Observations(filter_config, map)
+    lv, rv = [], []
     current_time = 0
 
-    lv, rv = [], []
+    # Robot initial command
+    cmd = MotorCommands()  # Initialize command structure for motors
+    init_angular_wheels_velocity_cmd = np.array([0.0, 0.0, 0.0, 0.0])
+    init_interface_all_wheels = ["velocity", "velocity", "velocity", "velocity"]
+    cmd.SetControlCmd(init_angular_wheels_velocity_cmd, init_interface_all_wheels)
 
     while True:
-
-
         # True state propagation (with process noise)
         ##### advance simulation ##################################################################
+        sim.Step(cmd, "torque")
+        time_step = sim.GetTimeStep()
         
 
         # Kalman filter prediction
-       
+        estimator.set_control_input(u_mpc)
+        estimator.predict_to(current_time)
+
     
         # Get the measurements from the simulator ###########################################
          # measurements of the robot without noise (just for comparison purpose) #############
-        base_pos_no_noise = sim.bot[0].base_position
+        base_pos_no_noise = sim.bot[0].base_position[:2]
         base_ori_no_noise = sim.bot[0].base_orientation
         base_bearing_no_noise_ = quaternion2bearing(base_ori_no_noise[3], base_ori_no_noise[0], base_ori_no_noise[1], base_ori_no_noise[2])
         base_lin_vel_no_noise  = sim.bot[0].base_lin_vel
         base_ang_vel_no_noise  = sim.bot[0].base_ang_vel
-        # Measurements of the current state (real measurements with noise) ##################################################################
-        base_pos = sim.GetBasePosition()
-        base_ori = sim.GetBaseOrientation()
-        base_bearing_ = quaternion2bearing(base_ori[3], base_ori[0], base_ori[1], base_ori[2])
+        base_pos_bearing_no_noise = np.hstack((base_pos_no_noise, base_bearing_no_noise_))
+        base_pos_bearing_no_noise = base_pos_bearing_no_noise.flatten()
+        
+
         # Update the filter with the latest observations
+        x_true_history.append(base_pos_bearing_no_noise)
+        obs.set_true_state(base_pos_bearing_no_noise)
         
-    
-        # Get the current state estimate
-   
-        # Compute the matrices needed for MPC optimization
-        # TODO here you want to update the matrices A and B at each time step if you want to linearize around the current points
-
-        # add this 3 lines if you want to update the A and B matrices at each time step 
-        #cur_state_x_for_linearization = [base_pos[0], base_pos[1], base_bearing_]
-        #cur_u_for_linearization = u_mpc
-        #regulator.updateSystemMatrices(sim,cur_state_x_for_linearization,cur_u_for_linearization)
-        S_bar, T_bar, Q_bar, R_bar = regulator.propagation_model_regulator_fixed_std()
-        H,F = regulator.compute_H_and_F(S_bar, T_bar, Q_bar, R_bar)
-        x0_mpc = np.hstack((base_pos[:2], base_bearing_))
-        x0_mpc = x0_mpc.flatten()
-        
-        x_true_history.append(x0_mpc)
-        obs.set_true_state(x0_mpc)
-
-        # EKF
-        estimator.set_control_input(u_mpc)
-        estimator.predict_to(current_time)
-
         #y = obs.landmark_range_observations()
         #y = obs.landmark_bearing_observations()
         y = obs.landmark_range_bearing_observations()
-
         #estimator.update_from_landmark_range_observations(y)
         #estimator.update_from_landmark_bearing_observations(y)
         estimator.update_from_landmark_range_bearing_observations(y)
 
-        # Get the current state estimate.
+
+        # Get the current state estimate
         x_est, Sigma_est = estimator.estimate()
         x_est_history.append(x_est)
         Sigma_est_history.append(np.diagonal(Sigma_est))
 
-        # MPC
-        regulator.updateSystemMatrices(sim, x0_mpc, u_mpc)
+
+        # Figure out what the controller should do next
+        # MPC section/ low level controller section ##################################################################
+
+
+        # Compute the matrices needed for MPC optimization
+        regulator.updateSystemMatrices(sim, base_pos_bearing_no_noise, u_mpc)
+        S_bar, T_bar, Q_bar, R_bar = regulator.propagation_model_regulator_fixed_std()
+        H,F = regulator.compute_H_and_F(S_bar, T_bar, Q_bar, R_bar)
+
 
         # Compute the optimal control sequence
         H_inv = np.linalg.inv(H)
         u_mpc = -H_inv @ F @ x_est  # WITH EKF
-        #u_mpc = -H_inv @ F @ x0_mpc  # WITHOUT EKF (ground truth)
-        # Return the optimal control sequence
-        u_mpc = u_mpc[0:num_controls] 
-        #u_mpc = [5.0, 15.]
+        #u_mpc = -H_inv @ F @ base_pos_bearing_no_noise  # WITHOUT EKF (ground truth)
+        u_mpc = u_mpc[0:num_controls]
+
+
         # Prepare control command to send to the low level controller
         left_wheel_velocity,right_wheel_velocity=velocity_to_wheel_angular_velocity(u_mpc[0],u_mpc[1], wheel_base_width, wheel_radius)
         angular_wheels_velocity_cmd = np.array([right_wheel_velocity, left_wheel_velocity, left_wheel_velocity, right_wheel_velocity])
         interface_all_wheels = ["velocity", "velocity", "velocity", "velocity"]
         cmd.SetControlCmd(angular_wheels_velocity_cmd, interface_all_wheels)
 
+
         lv.append(left_wheel_velocity)
         rv.append(right_wheel_velocity)
-
-        sim.Step(cmd, "torque")
-        time_step = sim.GetTimeStep()
 
         # Exit logic with 'q' key (unchanged)
         keys = sim.GetPyBulletClient().getKeyboardEvents()
         qKey = ord('q')
         if qKey in keys and keys[qKey] and sim.GetPyBulletClient().KEY_WAS_TRIGGERED:
             break
-        
-
-        # Store data for plotting if necessary
-        base_pos_all.append(base_pos)
-        base_bearing_all.append(base_bearing_)
 
         # Update current time
         current_time += time_step
-        if current_time > 5:
+        if current_time > 20:
             break
 
     x_true_history = np.array(x_true_history)
@@ -330,8 +277,8 @@ def main():
     # Plotting the true path, estimated path, and landmarks.
     plt.figure()
     plt.plot(x_true_history[:, 0], x_true_history[:, 1], label='True Path')
-    plt.scatter(init_pos[0], init_pos[1], color='green', s=100, label='Init position')
-    #plt.plot(x_est_history[:, 0], x_est_history[:, 1], label='Estimated Path')
+    plt.scatter(init_pos[0], init_pos[1], color='green', s=20, label='Init position')
+    plt.plot(x_est_history[:, 0], x_est_history[:, 1], label='Estimated Path')
     plt.scatter(map.landmarks[:, 0], map.landmarks[:, 1],
                 marker='x', color='red', label='Landmarks')
     plt.legend()

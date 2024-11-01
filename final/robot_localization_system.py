@@ -20,26 +20,36 @@ class FilterConfiguration(object):
 class Map(object):
     def __init__(self):
         self.landmarks = np.array([
+            # Task 1
             # [5, 10],
             # [15, 5],
             # [10, 15],
-            [2.5, 3.5],
+
+            # Tasks 3-4
+            [2.5, 3.5], 
             [2, 2],
             [1, 3],
-            #[-10, 10],
-            #[-5, 20],
-            #[0, 30],
-            # [10, 0],
-            # [0, -10],
-            # [-10, -10],
-            # [-20, 0]
         ])
+        # Task 1
         ln = []
-        for i in range(1, 6, 1):
-            for j in range(1, 6, 1):
-                if (i == 2 and j == 4):
+        for i in range(-10, 31, 5):
+            for j in range(-10, 31, 5):
+                ln.append([i, j])
+
+        #self.landmarks = np.array(ln)
+
+        # Tasks 3-4
+        ln = []
+        i = -0.5
+        while i < 3.:
+            j = -0.5
+            while j < 4:
+                if (i == 2 and j == 3):
+                    j+= 0.5
                     continue
-                ln.append([1. + i*0.5, 1. + j*0.5])
+                ln.append([i, j])
+                j += 0.5
+            i += 0.5
 
         self.landmarks = np.array(ln)
                 
