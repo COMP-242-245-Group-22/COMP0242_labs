@@ -25,7 +25,8 @@ W_range = 0.5**2  # Measurement noise variance (range measurements)
 landmarks = np.array([[5, 10], [15, 5], [10, 15]])
 
 
-def landmark_range_observations(base_position):
+# WE CHANGED THE FUNCTION IN THE LAST COMMIT (1 novemeber 2024, 16:45)
+def landmark_range_observations(base_position, W_range):
     y = []
     C = []
     W = W_range
@@ -33,7 +34,7 @@ def landmark_range_observations(base_position):
         # True range measurement (with noise)
         dx = lm[0] - base_position[0]
         dy = lm[1] - base_position[1]
-        range_meas = np.sqrt(dx**2 + dy**2)
+        range_meas = np.sqrt(dx**2 + dy**2) + np.random.normal(0, np.sqrt(W))
 
         y.append(range_meas)
 
@@ -167,7 +168,7 @@ def main():
         base_bearing_ = quaternion2bearing(
             base_ori[3], base_ori[0], base_ori[1], base_ori[2]
         )
-        y = landmark_range_observations(base_pos)
+        y = landmark_range_observations(base_pos, W_range)
 
         # Update the filter with the latest observations
 
@@ -221,8 +222,9 @@ def main():
             break
 
         # Store data for plotting if necessary
-        base_pos_all.append(base_pos)
-        base_bearing_all.append(base_bearing_)
+        # WE CHANGED THIS TWO LINES IN THE LAST COMMIT (1 novemeber 2024, 16:45)
+        base_pos_all.append(base_pos_no_noise)
+        base_bearing_all.append(base_bearing_no_noise_)
 
         # Update current time
         current_time += time_step
