@@ -20,12 +20,21 @@ from simulation_and_control import (
     wrap_angle,
 )
 
+TASK = 2
+ACT = 1.2
+EXT = "pdf"  # figure extension
+CUR_DIR = os.path.dirname(os.path.realpath(__file__))
+DIR = os.path.join(CUR_DIR, "figures", f"task{TASK}", f"act{ACT}")  # figure dir
+os.makedirs(DIR, exist_ok=True)
+print(f"Performing Task {TASK} Activity {ACT}...")
+
+
 # global variables
 W_range = 0.5**2  # Measurement noise variance (range measurements)
 landmarks = np.array([[5, 10], [15, 5], [10, 15]])
 
 
-# WE CHANGED THE FUNCTION IN THE LAST COMMIT (1 novemeber 2024, 16:45)
+# WE CHANGED THE FUNCTION IN THE LAST COMMIT (1 November 2024, 16:45)
 def landmark_range_observations(base_position, W_range):
     y = []
     C = []
@@ -61,7 +70,9 @@ def quaternion2bearing(q_w, q_x, q_y, q_z):
 def init_simulator(conf_file_name):
     """Initialize simulation and dynamic model."""
     cur_dir = os.path.dirname(os.path.abspath(__file__))
-    sim = pb.SimInterface(conf_file_name, conf_file_path_ext=cur_dir)
+    sim = pb.SimInterface(
+        conf_file_name, conf_file_path_ext=cur_dir, use_gui=True
+    )
 
     ext_names = np.expand_dims(np.array(sim.getNameActiveJoints()), axis=0)
     source_names = ["pybullet"]
@@ -103,23 +114,28 @@ def main():
 
     # Initialize the regulator model
     regulator = RegulatorModel(N_mpc, num_states, num_controls, num_states)
+
     # update A,B,C matrices
-    # TODO provide state_x_for_linearization,cur_u_for_linearization to linearize the system
-    # you can linearize around the final state and control of the robot (everything zero) or you can linearize around the current state and control of the robot in the second case case you need to update the matrices A and B at each time step and recall everytime the method updateSystemMatrices
+    # Provide state_x_for_linearization, cur_u_for_linearization to linearize the system
+    # You can linearize around the final state and control of the robot (everything zero) or you can linearize around the current state and control of the robot. In the second case, you need to update the matrices A and B at each time step and recall everytime the method updateSystemMatrices
     init_pos = np.array([2.0, 3.0])
     init_quat = np.array([0, 0, 0.3827, 0.9239])
     init_base_bearing_ = quaternion2bearing(
         init_quat[3], init_quat[0], init_quat[1], init_quat[2]
     )
-    cur_state_x_for_linearization = [
-        init_pos[0],
-        init_pos[1],
-        init_base_bearing_,
-    ]
+    if ACT == 1.1:
+        cur_state_x_for_linearization = np.zeros(num_states)
+    elif ACT == 1.2:
+        cur_state_x_for_linearization = [
+            init_pos[0],
+            init_pos[1],
+            init_base_bearing_,
+        ]
     cur_u_for_linearization = np.zeros(num_controls)
     regulator.updateSystemMatrices(
         sim, cur_state_x_for_linearization, cur_u_for_linearization
     )
+
     # Define the cost matrices
     Qcoeff = np.array([310, 310, 80.0])
     Rcoeff = 0.5
@@ -127,11 +143,11 @@ def main():
 
     u_mpc = np.zeros(num_controls)
 
-    ##### robot parameters ########
+    ############################# robot parameters #############################
     wheel_radius = 0.11
     wheel_base_width = 0.46
 
-    ##### MPC control action #######
+    ############################ MPC control action ############################
     v_linear = 0.0
     v_angular = 0.0
     cmd = MotorCommands()  # Initialize command structure for motors
@@ -141,17 +157,17 @@ def main():
         init_angular_wheels_velocity_cmd, init_interface_all_wheels
     )
 
-    while True:
+    while current_time < 5:
 
         # True state propagation (with process noise)
-        ##### advance simulation ##############################################
+        ########################## advance simulation ##########################
         sim.Step(cmd, "torque")
         time_step = sim.GetTimeStep()
 
         # Kalman filter prediction
 
-        # Get the measurements from the simulator ###########################################
-        # measurements of the robot without noise (just for comparison purpose) #############
+        # Get the measurements from the simulator ########################################################################
+        # measurements of the robot without noise (just for comparison purpose) ########################################################################
         base_pos_no_noise = sim.bot[0].base_position
         base_ori_no_noise = sim.bot[0].base_orientation
         base_bearing_no_noise_ = quaternion2bearing(
@@ -162,7 +178,7 @@ def main():
         )
         base_lin_vel_no_noise = sim.bot[0].base_lin_vel
         base_ang_vel_no_noise = sim.bot[0].base_ang_vel
-        # Measurements of the current state (real measurements with noise) ##################################################################
+        # Measurements of the current state (real measurements with noise) ########################################################################
         base_pos = sim.GetBasePosition()
         base_ori = sim.GetBaseOrientation()
         base_bearing_ = quaternion2bearing(
@@ -175,14 +191,21 @@ def main():
         # Get the current state estimate
 
         # Figure out what the controller should do next
-        # MPC section/ low level controller section ##################################################################
+        ############## MPC section/ low level controller section ###############
 
         # Compute the matrices needed for MPC optimization
-        # TODO here you want to update the matrices A and B at each time step if you want to linearize around the current points
-        # add this 3 lines if you want to update the A and B matrices at each time step
-        # cur_state_x_for_linearization = [base_pos[0], base_pos[1], base_bearing_]
-        # cur_u_for_linearization = u_mpc
-        # regulator.updateSystemMatrices(sim,cur_state_x_for_linearization,cur_u_for_linearization)
+        # Here you want to update the matrices A and B at each time step if you want to linearize around the current points
+        if ACT == 1.2:
+            # Update the A and B matrices at each time step
+            cur_state_x_for_linearization = [
+                base_pos[0],
+                base_pos[1],
+                base_bearing_,
+            ]
+            cur_u_for_linearization = u_mpc
+            regulator.updateSystemMatrices(
+                sim, cur_state_x_for_linearization, cur_u_for_linearization
+            )
         S_bar, T_bar, Q_bar, R_bar = (
             regulator.propagation_model_regulator_fixed_std()
         )
@@ -222,15 +245,40 @@ def main():
             break
 
         # Store data for plotting if necessary
-        # WE CHANGED THIS TWO LINES IN THE LAST COMMIT (1 novemeber 2024, 16:45)
+        # WE CHANGED THIS TWO LINES IN THE LAST COMMIT (1 November 2024, 16:45)
         base_pos_all.append(base_pos_no_noise)
         base_bearing_all.append(base_bearing_no_noise_)
 
         # Update current time
         current_time += time_step
 
-    # Plotting
-    # add visualization of final x, y, trajectory and theta
+    # Plotting final x, y, trajectory and theta
+    base_pos_all = np.array(base_pos_all)
+    base_bearing_all = np.array(base_bearing_all)
+    _, axs = plt.subplots(1, 2, figsize=(11, 5))
+    axs[0].plot(base_pos_all[:, 0], base_pos_all[:, 1], label="Trajectory")
+    axs[0].scatter(
+        base_pos_all[-1, 0],
+        base_pos_all[-1, 1],
+        label="Final Position",
+        marker="o",
+        color="orange",
+    )
+    axs[0].set_xlabel("x (m)")
+    axs[0].set_ylabel("y (m)")
+    axs[0].set_title("Trajectory")
+    axs[0].grid()
+    axs[0].legend()
+
+    axs[1].plot(base_bearing_all, label="Bearing")
+    axs[1].set_xlabel("Time (s)")
+    axs[1].set_ylabel("Theta (rad)")
+    axs[1].set_title("Bearing")
+    axs[1].grid()
+    axs[1].legend()
+    plt.subplots_adjust(wspace=0.3)
+    plt.savefig(f"{DIR}/trajectory_and_bearing.{EXT}")
+    # plt.show()
 
 
 if __name__ == "__main__":

@@ -114,7 +114,7 @@ class Simulator(object):
 
 TASK = 1
 ACT = 3
-EXT = "pdf"  # figure file extension
+EXT = "pdf"  # figure extension
 CUR_DIR = os.path.dirname(os.path.realpath(__file__))
 DIR = os.path.join(CUR_DIR, "figures", f"task{TASK}", f"act{ACT}")  # figure dir
 os.makedirs(DIR, exist_ok=True)
