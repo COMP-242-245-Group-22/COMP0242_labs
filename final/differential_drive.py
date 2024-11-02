@@ -255,30 +255,31 @@ def main():
     # Plotting final x, y, trajectory and theta
     base_pos_all = np.array(base_pos_all)
     base_bearing_all = np.array(base_bearing_all)
-    _, axs = plt.subplots(1, 2, figsize=(11, 5))
-    axs[0].plot(base_pos_all[:, 0], base_pos_all[:, 1], label="Trajectory")
-    axs[0].scatter(
-        base_pos_all[-1, 0],
-        base_pos_all[-1, 1],
-        label="Final Position",
-        marker="o",
-        color="orange",
+    start_x, start_y = base_pos_all[0, 0], base_pos_all[0, 1]
+    end_x, end_y = base_pos_all[-1, 0], base_pos_all[-1, 1]
+    plt.figure()
+    plt.plot(base_pos_all[:, 0], base_pos_all[:, 1], label="Trajectory")
+    plt.scatter(
+        start_x, start_y, c="g", label=f"Start ({start_x:.2f}, {start_y:.2f})"
     )
-    axs[0].set_xlabel("x (m)")
-    axs[0].set_ylabel("y (m)")
-    axs[0].set_title("Trajectory")
-    axs[0].grid()
-    axs[0].legend()
+    plt.scatter(end_x, end_y, c="r", label=f"End ({end_x:.2f}, {end_y:.2f})")
+    plt.xlabel("x (m)")
+    plt.ylabel("y (m)")
+    plt.title("Trajectory")
+    plt.legend()
+    plt.grid()
+    plt.savefig(f"{DIR}/trajectory.{EXT}")
+    plt.close()
 
-    axs[1].plot(base_bearing_all, label="Bearing")
-    axs[1].set_xlabel("Time (s)")
-    axs[1].set_ylabel("Theta (rad)")
-    axs[1].set_title("Bearing")
-    axs[1].grid()
-    axs[1].legend()
-    plt.subplots_adjust(wspace=0.3)
-    plt.savefig(f"{DIR}/trajectory_and_bearing.{EXT}")
-    # plt.show()
+    plt.figure()
+    plt.plot(base_bearing_all, label="Theta")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Theta (rad)")
+    plt.title("Theta")
+    plt.legend()
+    plt.grid()
+    plt.savefig(f"{DIR}/theta.{EXT}")
+    plt.close()
 
 
 if __name__ == "__main__":

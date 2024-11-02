@@ -109,7 +109,6 @@ class RegulatorModel:
         self.B = B
         self.C = np.eye(num_outputs)
 
-    # TODO you can change this function to allow for more passing a vector of gains
     def setCostMatrices(self, Qcoeff, Rcoeff):
         """
         Set the cost matrices Q and R for the MPC controller.
@@ -118,7 +117,6 @@ class RegulatorModel:
         Qcoeff: float or array-like
             State cost coefficient(s). If scalar, the same weight is applied to all states.
             If array-like, should have a length equal to the number of states.
-
         Rcoeff: float or array-like
             Control input cost coefficient(s). If scalar, the same weight is applied to all control inputs.
             If array-like, should have a length equal to the number of control inputs.
@@ -129,7 +127,6 @@ class RegulatorModel:
         self.R: ndarray
             Control input cost matrix.
         """
-        import numpy as np
 
         num_states = self.n
         num_controls = self.m
