@@ -71,7 +71,7 @@ print(rot_quat)
 def init_simulator(conf_file_name):
     """Initialize simulation and dynamic model."""
     cur_dir = os.path.dirname(os.path.abspath(__file__))
-    sim = pb.SimInterface(conf_file_name, conf_file_path_ext=cur_dir, use_gui=True)
+    sim = pb.SimInterface(conf_file_name, conf_file_path_ext=cur_dir, use_gui=False)
     
     ext_names = np.expand_dims(np.array(sim.getNameActiveJoints()), axis=0)
     source_names = ["pybullet"]
@@ -155,8 +155,8 @@ def main():
     wheel_base_width = 0.46
 
     # MPC: might be tuned
-    N_mpc = 10
-    Qcoeff = np.array([310, 310, 300.0])
+    N_mpc = 9
+    Qcoeff = np.array([310, 310, 310])
     Rcoeff = 0.5
 
     # MPC: no need to tune
@@ -234,19 +234,21 @@ def main():
 
         # Figure out what the controller should do next
         # MPC section/ low level controller section ##################################################################
+        regulator.updateSystemMatrices(sim, base_pos_bearing_no_noise, u_mpc)
 
 
         # Compute the matrices needed for MPC optimization
-        regulator.updateSystemMatrices(sim, base_pos_bearing_no_noise, u_mpc)
         S_bar, T_bar, Q_bar, R_bar = regulator.propagation_model_regulator_fixed_std()
-        H,F = regulator.compute_H_and_F(S_bar, T_bar, Q_bar, R_bar)
-
-
+        # [Alternative] compute the optimal control sequence using terminal cost
+        #S_bar, T_bar, Q_bar, R_bar = regulator.propagation_model_regulator_fixed_std_with_term_cost()
+        
         # Compute the optimal control sequence
+        H,F = regulator.compute_H_and_F(S_bar, T_bar, Q_bar, R_bar)
         H_inv = np.linalg.inv(H)
-        u_mpc = -H_inv @ F @ x_est  # WITH EKF
-        #u_mpc = -H_inv @ F @ base_pos_bearing_no_noise  # WITHOUT EKF (ground truth)
+        #u_mpc = -H_inv @ F @ x_est  # WITH EKF
+        u_mpc = -H_inv @ F @ base_pos_bearing_no_noise  # WITHOUT EKF (ground truth)
         u_mpc = u_mpc[0:num_controls]
+        #print(u_mpc)
 
 
         # Prepare control command to send to the low level controller
@@ -267,7 +269,7 @@ def main():
 
         # Update current time
         current_time += time_step
-        if current_time > 20:
+        if current_time > 15:
             break
 
     x_true_history = np.array(x_true_history)
@@ -278,7 +280,7 @@ def main():
     plt.figure()
     plt.plot(x_true_history[:, 0], x_true_history[:, 1], label='True Path')
     plt.scatter(init_pos[0], init_pos[1], color='green', s=20, label='Init position')
-    plt.plot(x_est_history[:, 0], x_est_history[:, 1], label='Estimated Path')
+    #plt.plot(x_est_history[:, 0], x_est_history[:, 1], label='Estimated Path')
     plt.scatter(map.landmarks[:, 0], map.landmarks[:, 1],
                 marker='x', color='red', label='Landmarks')
     plt.legend()

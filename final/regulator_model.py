@@ -1,4 +1,6 @@
 import numpy as np
+from control import dlqr, StateSpace
+from scipy.linalg import solve_discrete_are
     
 class RegulatorModel:
     def __init__(self, N, q, m, n):
@@ -29,6 +31,8 @@ class RegulatorModel:
 
         for k in range(1, self.N + 1):
             for j in range(1, k + 1):
+                #mm = np.dot(np.dot(self.C, np.linalg.matrix_power(self.A, j-1)), self.B)
+                #print("shape  : ", mm.shape, self.m, (k-j)*self.m, (k-j+1)*self.m)
                 S_bar[(k-1)*self.q:k*self.q, (k-j)*self.m:(k-j+1)*self.m] = np.dot(np.dot(self.C, np.linalg.matrix_power(self.A, j-1)), self.B)
 
             T_bar[(k-1)*self.q:k*self.q, :self.n] = np.dot(self.C, np.linalg.matrix_power(self.A, k))
@@ -37,6 +41,35 @@ class RegulatorModel:
             R_bar[(k-1)*self.m:k*self.m, (k-1)*self.m:k*self.m] = self.R
 
         return S_bar, T_bar, Q_bar, R_bar
+
+
+    def propagation_model_regulator_fixed_std_with_term_cost(self):
+
+        P = solve_discrete_are(self.A, self.B, self.Q, self.R)
+        self.N += 1
+
+        S_bar = np.zeros((self.N*self.q, self.N*self.m))
+        T_bar = np.zeros((self.N*self.q, self.n))
+        Q_bar = np.zeros((self.N*self.q, self.N*self.q))
+        R_bar = np.zeros((self.N*self.m, self.N*self.m))
+
+        for k in range(1, self.N + 1):
+            for j in range(1, k + 1):
+                S_bar[(k-1)*self.q:k*self.q, (k-j)*self.m:(k-j+1)*self.m] = np.dot(np.dot(self.C, np.linalg.matrix_power(self.A, j-1)), self.B)
+
+            T_bar[(k-1)*self.q:k*self.q, :self.n] = np.dot(self.C, np.linalg.matrix_power(self.A, k))
+
+            if k == self.N:
+                Q_bar[(k-1)*self.q:k*self.q, (k-1)*self.q:k*self.q] = P
+                R_bar[(k-1)*self.m:k*self.m, (k-1)*self.m:k*self.m] = np.zeros((self.m, self.m))
+            else:
+                Q_bar[(k-1)*self.q:k*self.q, (k-1)*self.q:k*self.q] = self.Q
+                R_bar[(k-1)*self.m:k*self.m, (k-1)*self.m:k*self.m] = self.R
+
+        self.N -= 1
+
+        return S_bar, T_bar, Q_bar, R_bar
+
     
     def updateSystemMatrices(self,sim,cur_x,cur_u):
         """
@@ -185,6 +218,7 @@ class RegulatorModel:
         self.A = A
         self.B = B
         self.C = np.eye(num_outputs)
+        self.D = np.zeros((num_outputs, num_controls))
         
 
     # TODO you can change this function to allow for more passing a vector of gains
