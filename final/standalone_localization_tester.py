@@ -70,8 +70,7 @@ class Simulator(object):
 
     # Get the observations to the landmarks. Return None if none visible
     def landmark_range_observations(self):
-        y = []
-        C = []
+        y_r = []
         W = self._filter_config.W_range
         for lm in self._map.landmarks:
             # True range measurement (with noise)
@@ -79,10 +78,28 @@ class Simulator(object):
             dy = lm[1] - self._x_true[1]
             range_true = np.sqrt(dx**2 + dy**2)
             range_meas = range_true + np.random.normal(0, np.sqrt(W))
-            y.append(range_meas)
+            y_r.append(range_meas)
 
-        y = np.array(y)
-        return y
+        y_r = np.array(y_r)
+        return y_r
+
+    def landmark_bearing_observations(self):
+        y_b = []
+        W = self._filter_config.W_bearing 
+
+        for lm in self._map.landmarks:
+            # True bearing measurement (relative to the robot's orientation)
+            dx = lm[0] - self._x_true[0]
+            dy = lm[1] - self._x_true[1]
+            bearing_true = np.arctan2(dy, dx) - self._x_true[2]
+            bearing_true = np.arctan2(np.sin(bearing_true), np.cos(bearing_true))# Normalize the bearing to be within [-pi, pi]
+            bearing_meas = bearing_true + np.random.normal(0, np.sqrt(W))
+            bearing_meas = np.arctan2(np.sin(bearing_meas), np.cos(bearing_meas))# Normalize the noisy bearing measurement to be within [-pi, pi]
+            y_b.append(bearing_meas)
+
+        y_b = np.array(y_b)
+        return y_b
+
 
     def x_true(self):
         return self._x_true
@@ -100,7 +117,6 @@ filter_config = FilterConfiguration()
 
 # Create the map object for the landmarks.
 map = Map()
-
 # Create the controller. This just provides
 # fixed control inputs for now.
 controller = Controller(sim_config)
@@ -126,7 +142,8 @@ Sigma_est_history = []
 
 # Main loop
 for step in range(sim_config.time_steps):
-
+    # Use some combinations of landmarks
+    map.use_more_landmarks()
     # Set the control input and propagate the
     # step the simulator with that control iput.
     simulator.set_control_input(u)
@@ -138,11 +155,12 @@ for step in range(sim_config.time_steps):
     estimator.predict_to(simulation_time)
 
     # Get the landmark observations.
-    y = simulator.landmark_range_observations()
+    y_r = simulator.landmark_range_observations()
+    # y_b = simulator.landmark_bearing_observations()
 
     # Update the filter with the latest observations.
-    estimator.update_from_landmark_range_observations(y)
-
+    estimator.update_from_landmark_range_observations(y_r)
+    # estimator.update_from_landmark_bearing_observations(y_b)
     # Get the current state estimate.
     x_est, Sigma_est = estimator.estimate()
 
@@ -171,25 +189,40 @@ plt.ylabel('Y position [m]')
 plt.title('Unicycle Robot Localization using EKF')
 plt.axis('equal')
 plt.grid(True)
+file_path = f'/Users/huangyuting/Estimation and Control/week_5/figures/activity4_combination_of_landmarks_and_bearing_measurement/activity4_trajectory.png'
+try:
+    plt.savefig(file_path)
+    print(f"Figure for trajectory saved successfully")
+except Exception as e:
+    print(f"Error saving figure for: {e}")
 plt.show()
-
-# Note the angle state theta experiences "angles
-# wrapping". This small helper function is used
-# to address the issue.
-
-
-def wrap_angle(angle): return np.arctan2(np.sin(angle), np.cos(angle))
-
 
 # Plot the 2 standard deviation and error history for each state.
 state_name = ['x', 'y', 'θ']
 estimation_error = x_est_history - x_true_history
+
+# Note the angle state theta experiences "angles
+# wrapping". This small helper function is used
+# to address the issue.
+def wrap_angle(angle): return np.arctan2(np.sin(angle), np.cos(angle))
+
 estimation_error[:, -1] = wrap_angle(estimation_error[:, -1])
+
 for s in range(3):
     plt.figure()
     two_sigma = 2*np.sqrt(Sigma_est_history[:, s])
+    threshold_pos = np.full_like(two_sigma, 0.1) 
+    threshold_neg = np.full_like(two_sigma, -0.1)
     plt.plot(estimation_error[:, s])
     plt.plot(two_sigma, linestyle='dashed', color='red')
     plt.plot(-two_sigma, linestyle='dashed', color='red')
+    plt.plot(threshold_pos, color='black', linestyle='--', label='10 cm Threshold')
+    plt.plot(threshold_neg, color='black', linestyle='--')
     plt.title(state_name[s])
+    file_path = f'/Users/huangyuting/Estimation and Control/week_5/figures/activity4_combination_of_landmarks_and_bearing_measurement/activity4_{state_name[s]}_threshold.png'
+    try:
+        plt.savefig(file_path)
+        print(f"Figure for {state_name[s]} saved successfully")
+    except Exception as e:
+        print(f"Error saving figure for {state_name[s]}: {e}")
     plt.show()
