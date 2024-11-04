@@ -8,14 +8,14 @@ class FilterConfiguration(object):
     def __init__(self):
         # Process and measurement noise covariance matrices
         # Process noise covariance represents the uncertainty in the system's predicted state, considering that multiple state variables (e.g., x-position, y-position, and orientation) can be interdependent.
-        self.V = np.diag([0.01, 0.01, 0.05]) ** 2  # Process noise covariance, V is the proccess noise
+        self.V = np.diag([0.1, 0.1, 0.05]) ** 2  # Process noise covariance, V is the proccess noise
         # Measurement noise variance (range measurements)
         # Single variable for individual senser reading
-        self.W_range = 0.03 ** 2 # distance to landmarks: 0.025m
-        self.W_bearing = (np.pi * 0.3 / 180.0) ** 2 # orientation relative to landmarks: 0.25radian
+        self.W_range = 0.5 ** 2 # distance to landmarks: 0.025m
+        self.W_bearing = (np.pi * 0.5 / 180.0) ** 2 # orientation relative to landmarks: 0.25radian
 
         # Initial conditions for the filter
-        self.x0 = np.array([1.0, 1.0, np.pi / 4])
+        self.x0 = np.array([2.0, 3.0, np.pi / 4])
         self.Sigma0 = np.diag([1.0, 1.0, 0.5]) ** 2
 
 
@@ -34,23 +34,8 @@ class Map(object):
             for i in range(n)
             for j in range(n)
          ])
-    # def use_more_landmarks(self, n=20, spacing=1):
-    #     # Generate landmarks along the line y = x
-    #     self.landmarks = np.array([
-    #         [i * spacing, i * spacing]
-    #         for i in range(n)
-    #     ])
-        # half_width = (width - 1) / 2 * spacing
-        # half_height = (height - 1) / 2 * spacing
-        # landmarks = []
-        # for i in range(width):
-        #     for j in range(height):
-        #         x =  - half_width + i * spacing
-        #         y =  - half_height + j * spacing
-        #         landmarks.append([x, y])
-        # self.landmarks = np.array(landmarks)
 
-        
+
 class RobotEstimator(object):
     def __init__(self, filter_config, map):
         # Variables which will be used
@@ -205,16 +190,3 @@ class RobotEstimator(object):
         # Convert lists to arrays
         C = np.array(C)
         y_pred = np.array(y_pred)
-
-        # Calculate the innovation (measurement residual)
-        nu = y_bearing - y_pred
-        # Normalize the bearing residual to be within [-pi, pi]
-        nu = np.arctan2(np.sin(nu), np.cos(nu))
-
-        # Measurement noise covariance for bearings
-        W_landmarks = self._config.W_bearing * np.eye(len(self._map.landmarks))
-        self._do_kf_update(nu, C, W_landmarks)
-
-        # Angle wrap afterwards for the estimated state
-        self._x_est[-1] = np.arctan2(np.sin(self._x_est[-1]),
-                                    np.cos(self._x_est[-1]))
