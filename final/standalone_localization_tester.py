@@ -82,7 +82,6 @@ class Simulator(object):
 
         y_r = np.array(y_r)
         return y_r
-
     def landmark_bearing_observations(self):
         y_b = []
         W = self._filter_config.W_bearing 
@@ -99,7 +98,6 @@ class Simulator(object):
 
         y_b = np.array(y_b)
         return y_b
-
 
     def x_true(self):
         return self._x_true
@@ -156,11 +154,11 @@ for step in range(sim_config.time_steps):
 
     # Get the landmark observations.
     y_r = simulator.landmark_range_observations()
-    # y_b = simulator.landmark_bearing_observations()
-
+    y_b = simulator.landmark_bearing_observations()
     # Update the filter with the latest observations.
     estimator.update_from_landmark_range_observations(y_r)
-    # estimator.update_from_landmark_bearing_observations(y_b)
+    estimator.update_from_landmark_bearing_observations(y_b)
+    
     # Get the current state estimate.
     x_est, Sigma_est = estimator.estimate()
 
@@ -189,7 +187,7 @@ plt.ylabel('Y position [m]')
 plt.title('Unicycle Robot Localization using EKF')
 plt.axis('equal')
 plt.grid(True)
-file_path = f'/Users/huangyuting/Estimation and Control/week_5/figures/activity4_combination_of_landmarks_and_bearing_measurement/activity4_trajectory.png'
+file_path = f'/Users/huangyuting/Estimation and Control/week_5/figures/task1/activity4_combination_of_landmarks_and_bearing_measurement/activity4_trajectory.png'
 try:
     plt.savefig(file_path)
     print(f"Figure for trajectory saved successfully")
@@ -216,10 +214,11 @@ for s in range(3):
     plt.plot(estimation_error[:, s])
     plt.plot(two_sigma, linestyle='dashed', color='red')
     plt.plot(-two_sigma, linestyle='dashed', color='red')
-    plt.plot(threshold_pos, color='black', linestyle='--', label='10 cm Threshold')
-    plt.plot(threshold_neg, color='black', linestyle='--')
+    if s < 2:
+        plt.plot(threshold_pos, color='black', linestyle='--', label='10 cm Threshold')
+        plt.plot(threshold_neg, color='black', linestyle='--')
     plt.title(state_name[s])
-    file_path = f'/Users/huangyuting/Estimation and Control/week_5/figures/activity4_combination_of_landmarks_and_bearing_measurement/activity4_{state_name[s]}_threshold.png'
+    file_path = f'/Users/huangyuting/Estimation and Control/week_5/figures/task1/activity4_combination_of_landmarks_and_bearing_measurement/activity4_{state_name[s]}_threshold.png'
     try:
         plt.savefig(file_path)
         print(f"Figure for {state_name[s]} saved successfully")
