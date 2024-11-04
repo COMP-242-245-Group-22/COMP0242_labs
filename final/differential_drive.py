@@ -1,5 +1,7 @@
 import numpy as np
+import math
 import time
+from typing import Literal
 import os
 import matplotlib.pyplot as plt
 from simulation_and_control import pb, MotorCommands, PinWrapper, feedback_lin_ctrl, SinusoidalReference, CartesianDiffKin, differential_drive_controller_adjusting_bearing
@@ -57,13 +59,24 @@ def quaternion2bearing(q_w, q_x, q_y, q_z):
     return bearing_
 
 
-print(quaternion2bearing(0, 0 , 1., 0.))
+print(quaternion2bearing(0.9239, 0, 0, 0.3827))
 
-rot = Rotation.from_euler('xyz', [0, 0, -45], degrees=True)
+rot = Rotation.from_euler('xyz', [0, 0, 0], degrees=True)
 
 # Convert to quaternions and print
 rot_quat = rot.as_quat()
 print(rot_quat)
+
+# Position change:
+# [2,   3]    45 deg: [0, 0,  0.3827,     0.9239]
+# [-2,  3]   -45 deg: [0, 0, -0.38268343, 0.92387953]  Q = [311, 311, 311]
+# [-1, -4]    76 deg: [0, 0,  0.61566148, 0.78801075]  Q = [309, 309, 309]
+# [ 3, -2]   -33 deg: [0, 0, -0.28401534, 0.95881973]
+
+# Orientation change:
+# [2, 3]   -45 deg: [0, 0, -0.38268343, 0.92387953]
+# [2, 3]    90 deg: [0, 0,  0.70710678, 0.70710678]
+# [2, 3]     0 deg: [0, 0, 0, 1]
 
 #exit(0)
 
@@ -143,25 +156,45 @@ class Observations(object):
         y = np.array(y)
         return y
 
+class Mode:
+    GT = "ground_truth"
+    EKF = "ekf"
+
 
 def main():
+    # MPC and etc: might be tuned
+    N_mpc = 8
+    Qcoeff = np.array([312, 312, 312])
+    Rcoeff = 0.5
+    TASK = 3   # 2, 3, 4, TASK 1 is in a separate file
+
+    if TASK == 4:
+        run_sim(N_mpc, Qcoeff, Rcoeff, TASK, Mode.GT)
+        run_sim(N_mpc, Qcoeff, Rcoeff, TASK, Mode.EKF)
+    elif TASK == 3:
+        run_sim(N_mpc, Qcoeff, Rcoeff, TASK, Mode.EKF)
+    elif TASK == 2:
+        run_sim(N_mpc, Qcoeff, Rcoeff, TASK, Mode.GT, False, 'zero')
+        run_sim(N_mpc, Qcoeff, Rcoeff, TASK, Mode.GT, True, 'zero')
+        run_sim(N_mpc, Qcoeff, Rcoeff, TASK, Mode.GT, False)
+        run_sim(N_mpc, Qcoeff, Rcoeff, TASK, Mode.GT, True)
+    else:
+        print(F'WRONG TASK NUM {TASK}')
+            
+
+def run_sim(N_mpc, Qcoeff, Rcoeff, task, mode: Mode, term_m: bool = True, mpc = ''):
     # Configuration for the simulation
     conf_file_name = "robotnik.json"  # Configuration file for the robot
     sim,dyn_model,num_joints=init_simulator(conf_file_name)
 
-    sim.SetFloorFriction(100)
-    time_step = sim.GetTimeStep()
     wheel_radius = 0.11
     wheel_base_width = 0.46
-
-    # MPC: might be tuned
-    N_mpc = 9
-    Qcoeff = np.array([310, 310, 310])
-    Rcoeff = 0.5
-
-    # MPC: no need to tune
     num_states = 3
     num_controls = 2
+
+    sim.SetFloorFriction(1)
+    time_step = sim.GetTimeStep()
+
     init_pos = np.array(sim.bot[0].base_position[:2])
     init_quat = sim.bot[0].base_orientation
     init_base_bearing_ = quaternion2bearing(init_quat[3], init_quat[0], init_quat[1], init_quat[2])
@@ -183,6 +216,7 @@ def main():
     x_est_history = []
     Sigma_est_history = []
     lv, rv = [], []
+    ss_x_error, ss_y_error, ss_ori_error = [], [], []
     current_time = 0
 
     # Robot initial command
@@ -202,7 +236,6 @@ def main():
         estimator.set_control_input(u_mpc)
         estimator.predict_to(current_time)
 
-    
         # Get the measurements from the simulator ###########################################
          # measurements of the robot without noise (just for comparison purpose) #############
         base_pos_no_noise = sim.bot[0].base_position[:2]
@@ -216,6 +249,9 @@ def main():
 
         # Update the filter with the latest observations
         x_true_history.append(base_pos_bearing_no_noise)
+        ss_x_error.append(base_pos_no_noise[0])
+        ss_y_error.append(base_pos_no_noise[1])
+        ss_ori_error.append(base_bearing_no_noise_)
         obs.set_true_state(base_pos_bearing_no_noise)
         
         #y = obs.landmark_range_observations()
@@ -234,19 +270,22 @@ def main():
 
         # Figure out what the controller should do next
         # MPC section/ low level controller section ##################################################################
-        regulator.updateSystemMatrices(sim, base_pos_bearing_no_noise, u_mpc)
+        if mpc != 'zero':
+            regulator.updateSystemMatrices(sim, base_pos_bearing_no_noise, u_mpc)
 
 
         # Compute the matrices needed for MPC optimization
-        S_bar, T_bar, Q_bar, R_bar = regulator.propagation_model_regulator_fixed_std()
+        S_bar, T_bar, Q_bar, R_bar = regulator.propagation_model_regulator_fixed_std_choice(with_term_m=term_m)
         # [Alternative] compute the optimal control sequence using terminal cost
         #S_bar, T_bar, Q_bar, R_bar = regulator.propagation_model_regulator_fixed_std_with_term_cost()
         
         # Compute the optimal control sequence
         H,F = regulator.compute_H_and_F(S_bar, T_bar, Q_bar, R_bar)
         H_inv = np.linalg.inv(H)
-        #u_mpc = -H_inv @ F @ x_est  # WITH EKF
-        u_mpc = -H_inv @ F @ base_pos_bearing_no_noise  # WITHOUT EKF (ground truth)
+        if mode == Mode.EKF:
+            u_mpc = -H_inv @ F @ x_est  # WITH EKF
+        else:
+            u_mpc = -H_inv @ F @ base_pos_bearing_no_noise  # WITHOUT EKF (ground truth)
         u_mpc = u_mpc[0:num_controls]
         #print(u_mpc)
 
@@ -269,7 +308,7 @@ def main():
 
         # Update current time
         current_time += time_step
-        if current_time > 15:
+        if current_time > 10:
             break
 
     x_true_history = np.array(x_true_history)
@@ -280,44 +319,104 @@ def main():
     plt.figure()
     plt.plot(x_true_history[:, 0], x_true_history[:, 1], label='True Path')
     plt.scatter(init_pos[0], init_pos[1], color='green', s=20, label='Init position')
-    #plt.plot(x_est_history[:, 0], x_est_history[:, 1], label='Estimated Path')
+    if mode == Mode.EKF:
+        plt.plot(x_est_history[:, 0], x_est_history[:, 1], label='Estimated Path', linestyle='dashed')
     plt.scatter(map.landmarks[:, 0], map.landmarks[:, 1],
                 marker='x', color='red', label='Landmarks')
     plt.legend()
     plt.xlabel('X position [m]')
     plt.ylabel('Y position [m]')
-    plt.title('Unicycle Robot Localization using EKF')
+    if mode == Mode.EKF:
+        plt.title('Unicycle Robot Localization using EKF')
+    else:
+        plt.title('Unicycle Robot Localization using ground truth measurements')
     plt.axis('equal')
     plt.grid(True)
     plt.legend()
-    
+    if mode == Mode.EKF:
+        plt.savefig(f'task{task}/{init_pos[0]}_{init_pos[1]}_{math.degrees(init_base_bearing_):.0f}_{term_m}_ekf.pdf')
+    elif mpc == 'zero':
+        plt.savefig(f'task{task}/{init_pos[0]}_{init_pos[1]}_{math.degrees(init_base_bearing_):.0f}_{term_m}_zerolin_gt.pdf')
+    else:
+        plt.savefig(f'task{task}/{init_pos[0]}_{init_pos[1]}_{math.degrees(init_base_bearing_):.0f}_{term_m}_gt.pdf')
 
-    # Plotting the true path, estimated path, and landmarks.
+
+    def get_overshoots(p, t):
+        o = []
+        eps = 0.0001
+        f = 0
+        for i in range(1, len(p)):
+            if p[0] > 0:
+                if p[i] < -eps and not f:
+                    o.append(i)
+                    f = 1
+                elif p[i] > eps:
+                    f = 0
+            else:
+                if p[i] > eps and not f:
+                    o.append(i)
+                    f = 1
+                elif p[i] < -eps:
+                    f = 0
+        return np.array(o)
+
+    # Plotting the steady state errors and settling time.
     plt.figure()
-    plt.plot(lv, label='Left wheel velocity')
-    plt.plot(rv, label='Right wheel velocity')   
-    plt.title('Velocities') 
-    plt.grid(True)
-    plt.legend()
-    plt.show()
+    err = [ss_x_error, ss_y_error, ss_ori_error]
+    FF = ['X', 'Y', 'θ']
 
-    def wrap_angle(angle): return np.arctan2(np.sin(angle), np.cos(angle))
+    for i in range(3):
+        plt.subplot(3, 1, i+1)
+        plt.plot(err[i])
+        tolerance_band = abs(err[i][0]) * 0.07  # 7% tolerance
+        settling_time = np.max(np.where(np.abs(err[i]) > tolerance_band)[0])
+        overshoots = get_overshoots(err[i], tolerance_band)
+        plt.axhline(y=-tolerance_band, linestyle='--', linewidth=0.03)
+        plt.axhline(y=tolerance_band, linestyle='--', linewidth=0.03)
+        if settling_time != len(err[i]) - 1:
+            plt.axvline(x=settling_time, color='g', linestyle='--', label='7% Settling Time')
+        for j, o in enumerate(overshoots):
+            if j > 0:
+                plt.axvline(x=o, color='r', linestyle='--')
+            else:
+                plt.axvline(x=o, color='r', linestyle='--', label='Overshoot')
+        plt.xlabel('Time steps')
+        plt.ylabel('Error')
+        plt.title(f'Steady state {FF[i]} response')
+        plt.grid(True)
+        plt.legend()
 
-    # Plot the 2 standard deviation and error history for each state.
-    state_name = ['x', 'y', 'θ']
-    estimation_error = x_est_history - x_true_history
-    estimation_error[:, -1] = wrap_angle(estimation_error[:, -1])
-    for s in range(3):
-        plt.figure()
-        two_sigma = 2*np.sqrt(Sigma_est_history[:, s])
-        plt.plot(estimation_error[:, s])
-        plt.plot(two_sigma, linestyle='dashed', color='red')
-        plt.plot(-two_sigma, linestyle='dashed', color='red')
-        plt.title(state_name[s])
-        plt.show()
-    
+        plt.tight_layout()
 
+    if mode == 'ekf':
+        plt.savefig(f'task{task}/sse_{init_pos[0]}_{init_pos[1]}_{math.degrees(init_base_bearing_):.0f}_{term_m}_ekf.pdf')
+    elif mpc == 'zero':
+        plt.savefig(f'task{task}/sse_{init_pos[0]}_{init_pos[1]}_{math.degrees(init_base_bearing_):.0f}_{term_m}_zerolin_gt.pdf')
+    else:
+        plt.savefig(f'task{task}/sse_{init_pos[0]}_{init_pos[1]}_{math.degrees(init_base_bearing_):.0f}_{term_m}_gt.pdf')
 
+    # plt.figure()
+    # plt.plot(lv, label='Left wheel velocity')
+    # plt.plot(rv, label='Right wheel velocity')   
+    # plt.title('Velocities') 
+    # plt.grid(True)
+    # plt.legend()
+    # plt.show()
+
+    # def wrap_angle(angle): return np.arctan2(np.sin(angle), np.cos(angle))
+
+    # # Plot the 2 standard deviation and error history for each state.
+    # state_name = ['x', 'y', 'θ']
+    # estimation_error = x_est_history - x_true_history
+    # estimation_error[:, -1] = wrap_angle(estimation_error[:, -1])
+    # for s in range(3):
+    #     plt.figure()
+    #     two_sigma = 2*np.sqrt(Sigma_est_history[:, s])
+    #     plt.plot(estimation_error[:, s])
+    #     plt.plot(two_sigma, linestyle='dashed', color='red')
+    #     plt.plot(-two_sigma, linestyle='dashed', color='red')
+    #     plt.title(state_name[s])
+    #     plt.show()
     
     
     

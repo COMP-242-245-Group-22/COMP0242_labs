@@ -23,6 +23,13 @@ class RegulatorModel:
 
         return H, F
 
+    def propagation_model_regulator_fixed_std_choice(self, with_term_m: bool = True):
+        if not with_term_m:
+            return self.propagation_model_regulator_fixed_std()
+        else:
+            return self.propagation_model_regulator_fixed_std_with_term_cost()
+
+
     def propagation_model_regulator_fixed_std(self):
         S_bar = np.zeros((self.N*self.q, self.N*self.m))
         T_bar = np.zeros((self.N*self.q, self.n))
