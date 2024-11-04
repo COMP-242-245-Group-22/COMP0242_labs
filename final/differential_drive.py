@@ -1,27 +1,18 @@
 import os
-import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pinocchio as pin
 from regulator_model import RegulatorModel
 from simulation_and_control import (
-    CartesianDiffKin,
     MotorCommands,
     PinWrapper,
-    SinusoidalReference,
-    differential_drive_controller_adjusting_bearing,
-    differential_drive_regulation_controller,
-    feedback_lin_ctrl,
     pb,
-    regulation_polar_coordinate_quat,
-    regulation_polar_coordinates,
     velocity_to_wheel_angular_velocity,
-    wrap_angle,
 )
 
 TASK = 2
-ACT = 1.2
+ACT = 3
 EXT = "pdf"  # figure extension
 CUR_DIR = os.path.dirname(os.path.realpath(__file__))
 DIR = os.path.join(CUR_DIR, "figures", f"task{TASK}", f"act{ACT}")  # figure dir
@@ -98,7 +89,7 @@ def main():
     current_time = 0
 
     # Initialize data storage
-    base_pos_all, base_bearing_all = [], []  #
+    base_pos_all, base_bearing_all = [], []
 
     # initializing MPC
     # Define the matrices
@@ -106,11 +97,10 @@ def main():
     num_controls = 2
 
     # Measuring all the state
-
     C = np.eye(num_states)
 
     # Horizon length
-    N_mpc = 10
+    N_mpc = 10 if ACT <= 2 else 9
 
     # Initialize the regulator model
     regulator = RegulatorModel(N_mpc, num_states, num_controls, num_states)
@@ -123,9 +113,8 @@ def main():
     init_base_bearing_ = quaternion2bearing(
         init_quat[3], init_quat[0], init_quat[1], init_quat[2]
     )
-    if ACT == 1.1:
-        cur_state_x_for_linearization = np.zeros(num_states)
-    elif ACT == 1.2:
+    cur_state_x_for_linearization = np.zeros(num_states)
+    if ACT > 1.1:
         cur_state_x_for_linearization = [
             init_pos[0],
             init_pos[1],
@@ -137,7 +126,7 @@ def main():
     )
 
     # Define the cost matrices
-    Qcoeff = np.array([310, 310, 80.0])
+    Qcoeff = 275 if ACT > 1 else np.array([310, 310, 80.0])
     Rcoeff = 0.5
     regulator.setCostMatrices(Qcoeff, Rcoeff)
 
@@ -195,7 +184,7 @@ def main():
 
         # Compute the matrices needed for MPC optimization
         # Here you want to update the matrices A and B at each time step if you want to linearize around the current points
-        if ACT == 1.2:
+        if ACT > 1.1:
             # Update the A and B matrices at each time step
             cur_state_x_for_linearization = [
                 base_pos[0],
@@ -207,7 +196,7 @@ def main():
                 sim, cur_state_x_for_linearization, cur_u_for_linearization
             )
         S_bar, T_bar, Q_bar, R_bar = (
-            regulator.propagation_model_regulator_fixed_std()
+            regulator.propagation_model_regulator_fixed_std(ACT == 3)
         )
         H, F = regulator.compute_H_and_F(S_bar, T_bar, Q_bar, R_bar)
         x0_mpc = np.hstack((base_pos[:2], base_bearing_))

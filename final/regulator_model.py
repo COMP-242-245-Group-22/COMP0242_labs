@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.linalg import solve_discrete_are
 
 
 class RegulatorModel:
@@ -15,19 +16,55 @@ class RegulatorModel:
 
     def compute_H_and_F(self, S_bar, T_bar, Q_bar, R_bar):
         # Compute H
-        H = np.dot(S_bar.T, np.dot(Q_bar, S_bar)) + R_bar
+        H = S_bar.T @ (Q_bar @ S_bar) + R_bar
 
         # Compute F
-        F = np.dot(S_bar.T, np.dot(Q_bar, T_bar))
-
+        F = S_bar.T @ (Q_bar @ T_bar)
         return H, F
 
-    def propagation_model_regulator_fixed_std(self):
+    def propagation_model_regulator_fixed_std(self, use_term_cost=False):
+        if use_term_cost:
+            Q_ = self.Q + 1e-8 * np.eye(self.Q.shape[0])
+            R_ = self.R + 1e-8 * np.eye(self.R.shape[0])
+            P = solve_discrete_are(self.A, self.B, Q_, R_)
+
+        N_ = self.N + use_term_cost
+        Nq = N_ * self.q
+        Nm = N_ * self.m
+        S_bar = np.zeros((Nq, Nm))
+        T_bar = np.zeros((Nq, self.n))
+        Q_bar = np.zeros((Nq, Nq))
+        R_bar = np.zeros((Nm, Nm))
+
+        for k in range(1, N_ + 1):
+            k1q, kq = (k - 1) * self.q, k * self.q
+            k1m, km = (k - 1) * self.m, k * self.m
+            for j in range(1, k + 1):
+                kjm, kj1m = (k - j) * self.m, (k - j + 1) * self.m
+                S_bar[k1q:kq, kjm:kj1m] = (
+                    self.C @ np.linalg.matrix_power(self.A, j - 1)
+                ) @ self.B
+
+            T_bar[k1q:kq, :] = self.C @ np.linalg.matrix_power(self.A, k)
+
+            if k == self.N + 1:
+                Q_bar[k1q:kq, k1q:kq] = P
+                R_bar[k1m:km, k1m:km] = np.zeros((self.m, self.m))
+            else:
+                Q_bar[k1q:kq, k1q:kq] = self.Q
+                R_bar[k1m:km, k1m:km] = self.R
+
+        return S_bar, T_bar, Q_bar, R_bar
+
+    def propagation_model_regulator_fixed_std_with_term_cost(self):
+        Q_ = self.Q + 1e-8 * np.eye(self.Q.shape[0])
+        R_ = self.R + 1e-8 * np.eye(self.R.shape[0])
+        P = solve_discrete_are(self.A, self.B, Q_, R_)
+        self.N += 1
         S_bar = np.zeros((self.N * self.q, self.N * self.m))
         T_bar = np.zeros((self.N * self.q, self.n))
         Q_bar = np.zeros((self.N * self.q, self.N * self.q))
         R_bar = np.zeros((self.N * self.m, self.N * self.m))
-
         for k in range(1, self.N + 1):
             for j in range(1, k + 1):
                 S_bar[
@@ -37,18 +74,24 @@ class RegulatorModel:
                     np.dot(self.C, np.linalg.matrix_power(self.A, j - 1)),
                     self.B,
                 )
-
             T_bar[(k - 1) * self.q : k * self.q, : self.n] = np.dot(
                 self.C, np.linalg.matrix_power(self.A, k)
             )
-
-            Q_bar[
-                (k - 1) * self.q : k * self.q, (k - 1) * self.q : k * self.q
-            ] = self.Q
-            R_bar[
-                (k - 1) * self.m : k * self.m, (k - 1) * self.m : k * self.m
-            ] = self.R
-
+            if k == self.N:
+                Q_bar[
+                    (k - 1) * self.q : k * self.q, (k - 1) * self.q : k * self.q
+                ] = P
+                R_bar[
+                    (k - 1) * self.m : k * self.m, (k - 1) * self.m : k * self.m
+                ] = np.zeros((self.m, self.m))
+            else:
+                Q_bar[
+                    (k - 1) * self.q : k * self.q, (k - 1) * self.q : k * self.q
+                ] = self.Q
+                R_bar[
+                    (k - 1) * self.m : k * self.m, (k - 1) * self.m : k * self.m
+                ] = self.R
+        self.N -= 1
         return S_bar, T_bar, Q_bar, R_bar
 
     def updateSystemMatrices(self, sim, cur_x, cur_u):
@@ -76,33 +119,26 @@ class RegulatorModel:
                 "Also, ensure that you implement the linearization logic in the updateSystemMatrices function."
             )
 
-        num_states = self.n
-        num_controls = self.m
         num_outputs = self.q
         delta_t = sim.GetTimeStep()
         v0 = cur_u[0]
         theta0 = cur_x[2]
 
-        # Get A and B matrices by linearizing the continuous system dynamics
-        # Linearize the continuous-time system
-        A_c = np.array(
+        A = np.array(
             [
-                [0, 0, -v0 * np.sin(theta0)],
-                [0, 0, v0 * np.cos(theta0)],
-                [0, 0, 0],
-            ]
-        )
-        B_c = np.array(
-            [
-                [np.cos(theta0), 0],
-                [np.sin(theta0), 0],
-                [0, 1],
+                [1, 0, -v0 * delta_t * np.sin(theta0)],
+                [0, 1, v0 * delta_t * np.cos(theta0)],
+                [0, 0, 1],
             ]
         )
 
-        # Discretize the system
-        A = np.eye(num_states) + delta_t * A_c
-        B = delta_t * B_c
+        B = np.array(
+            [
+                [delta_t * np.cos(theta0), 0],
+                [delta_t * np.sin(theta0), 0],
+                [0, delta_t],
+            ]
+        )
 
         # Updating the state and control input matrices
         self.A = A
